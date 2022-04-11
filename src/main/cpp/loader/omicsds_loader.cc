@@ -26,6 +26,9 @@
 
 #include "omicsds_loader.h"
 
+#include <iostream>
+#include <math.h> 
+
 void read_sam_file(std::string filename) {
   std::cerr << "SAM file is " << filename << std::endl;
 

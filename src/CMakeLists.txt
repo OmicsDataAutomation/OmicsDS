@@ -24,56 +24,5 @@
 # THE SOFTWARE.
 #
 
-set(OMICSDS_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/main/cpp")
-
-set(OMICSDB_INCLUDE
-  ${OMICSDS_MAIN}/loader/omicsdb_loader.h
-  )
-
-set(OMICSDS_SOURCES
-  ${OMICSDS_MAIN}/loader/omicsds_loader.cc
-  )
-
-# Use PIC
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-add_library(omicsds_objs OBJECT ${OMICSDS_SOURCES})
-
-target_include_directories(omicsds_objs
-  PUBLIC ${CMAKE_BINARY_DIR}/src
-  PRIVATE ${OMICSDS_MAIN} ${TILEDB_INCLUDE_DIR}
-  )
-
-# Create static library
-add_library(omicsds_static STATIC $<TARGET_OBJECTS:omicsds_objs>)
-set_target_properties(omicsds_static PROPERTIES OUTPUT_NAME "omicsds" VERSION ${OMICSDS_VERSION})
-target_link_libraries(omicsds_static
-  tiledb_static
-  ${IMAGEDS_DEPENDENCIES}
-  pthread
-  ${CMAKE_DL_LIBS} # add -ldl
-  ) 
-
-# Create shared library
-add_library(omicsds_shared SHARED $<TARGET_OBJECTS:omicsds_objs>)
-set_target_properties(omicsds_shared PROPERTIES OUTPUT_NAME "omicsds" VERSION ${OMICSDS_VERSION} SOVERSION 1)
-target_link_libraries(omicsds_shared 
-  tiledb_static
-  ${OMICSDS_DEPENDENCIES}
-  pthread
-  ${CMAKE_DL_LIBS} # add -ldl
-  )
-
-# Install libraries
-install(
-  TARGETS omicsds_static omicsds_shared
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  )
-
-install(
-  FILES ${OMICSDS_INCLUDE} ${EXPORTS_HEADER} DESTINATION include
-  )
-
+add_subdirectory(main)
 add_subdirectory(test)
