@@ -1,0 +1,9 @@
+[submodule "dependencies/spdlog"]
+	path = dependencies/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "dependencies/htslib"]
+	path = dependencies/htslib
+	url = https://github.com/GenomicsDB/htslib.git
+[submodule "dependencies/TileDB"]
+	path = dependencies/TileDB
+	url = https://github.com/OmicsDataAutomation/TileDB.git
