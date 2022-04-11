@@ -7,3 +7,6 @@
 [submodule "dependencies/TileDB"]
 	path = dependencies/TileDB
 	url = https://github.com/OmicsDataAutomation/TileDB.git
+[submodule "src/test/cpp/Catch2"]
+	path = src/test/cpp/Catch2
+	url = https://github.com/catchorg/Catch2.git

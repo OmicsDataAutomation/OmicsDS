@@ -24,3 +24,10 @@
  * Test generic SAM reader
  */
 
+#include <catch2/catch.hpp>
+
+#include "omicsds_loader.h"
+
+TEST_CASE("test generic SAM reader", "[test_basic]") {
+  read_sam_file(std::string());
+}
