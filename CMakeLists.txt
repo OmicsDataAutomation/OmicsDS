@@ -67,10 +67,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set -fvisibility=hidden (or equivalent) flags by default.
-set(CMAKE_C_VISIBILITY_PRESET hidden)
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-   
 # Optimization flag
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND BUILD_FOR_ARCH)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${BUILD_FOR_ARCH}")
@@ -87,6 +83,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-reorder -Wno-unused-variable -Wno-pessimizing-move -Wno-deprecated-declarations")
 endif()
+
+# Honor visibility properties for all target types.
+# https://www.cmake.org/cmake/help/latest/policy/CMP0063.html
+cmake_policy(SET CMP0063 NEW)
 
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
@@ -121,7 +121,7 @@ enable_testing()
 add_subdirectory(src)
 
 # Unininstall OmicsDS
-add_custom_target(uninstall
+add_custom_target(uninstall-omicsds
   COMMAND echo "-- Uninstalling OmicsDS from ${CMAKE_INSTALL_PREFIX}..."
   COMMAND < install_manifest.txt xargs -I % sh -c 'echo -- Uninstalling % && rm -f %' %
   COMMAND echo "-- OmicsDS is uninstalled!"

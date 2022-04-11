@@ -26,9 +26,10 @@
 
 #pragma once
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <htslib/sam.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
 
 void read_sam_file(std::string filename);

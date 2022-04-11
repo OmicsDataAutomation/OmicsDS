@@ -31,7 +31,7 @@ set(OMICSDB_INCLUDE
   )
 
 set(OMICSDS_SOURCES
-  ${IMAGEDS_MAIN}/loader/omicsds_loader.cc
+  ${OMICSDS_MAIN}/loader/omicsds_loader.cc
   )
 
 # Use PIC
