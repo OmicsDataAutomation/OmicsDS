@@ -24,11 +24,7 @@
 # THE SOFTWARE.
 #
 
-# CMake/GCC doesn't add "-pie" by default for executables (CMake issue #14983)
-if(NOT APPLE)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pie")
-endif()
-
 add_executable(omicsds_import import.cc)
+target_include_directories(omicsds_import PRIVATE ${CMAKE_SOURCE_DIR}/src/main/cpp/loader)
 target_link_libraries(omicsds_import omicsds_static)
 
