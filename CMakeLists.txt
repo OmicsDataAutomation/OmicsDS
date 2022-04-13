@@ -116,9 +116,14 @@ set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -g3 -gdwarf-3")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -fvisibility=hidden")
 set(CMAKE_CXX_FLAGS_COVERAGE "-DDEBUG -g3 -gdwarf-3 --coverage")
 
+include_directories(src/loader)
+
 # Build and Test OmicsDS
 enable_testing()
 add_subdirectory(src)
+
+# Build tools
+add_subdirectory(tools)
 
 # Unininstall OmicsDS
 add_custom_target(uninstall-omicsds
