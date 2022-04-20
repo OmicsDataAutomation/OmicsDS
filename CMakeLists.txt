@@ -49,6 +49,8 @@ execute_process(
 set(OMICSDS_RELEASE_VERSION "0.0.1-SNAPSHOT" CACHE STRING "OmicsDS release version")
 set(OMICSDS_VERSION "${OMICSDS_RELEASE_VERSION}-${GIT_COMMIT_HASH}" CACHE STRING "OmicsDS full version string")
 
+set(DISABLE_OPENMP False CACHE BOOL "Disable OpenMP")
+
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -92,6 +94,10 @@ find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(libuuid REQUIRED)
+if (NOT DISABLE_OPENMP)
+  find_package(OpenMP REQUIRED)
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
 
 # SpdLog
 find_package(Spdlog REQUIRED)
