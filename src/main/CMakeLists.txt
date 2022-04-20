@@ -48,6 +48,7 @@ target_include_directories(omicsds_objs
 # Create static library
 add_library(omicsds_static STATIC $<TARGET_OBJECTS:omicsds_objs>)
 set_target_properties(omicsds_static PROPERTIES OUTPUT_NAME "omicsds" VERSION ${OMICSDS_VERSION})
+add_dependencies(omicsds_static htslib)
 target_link_libraries(omicsds_static
   tiledb_static
   ${OMICSDS_DEPENDENCIES}
@@ -58,6 +59,7 @@ target_link_libraries(omicsds_static
 # Create shared library
 add_library(omicsds_shared SHARED $<TARGET_OBJECTS:omicsds_objs>)
 set_target_properties(omicsds_shared PROPERTIES OUTPUT_NAME "omicsds" VERSION ${OMICSDS_VERSION} SOVERSION 1)
+add_dependencies(omicsds_shared htslib)
 target_link_libraries(omicsds_shared 
   tiledb_static
   ${OMICSDS_DEPENDENCIES}

@@ -24,5 +24,4 @@
 # THE SOFTWARE.
 #
 
-include_directories(Catch INTERFACE Catch2/single_include)
 add_subdirectory(cpp)
