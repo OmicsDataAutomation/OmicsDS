@@ -88,7 +88,7 @@ endif()
 
 # Honor visibility properties for all target types.
 # https://www.cmake.org/cmake/help/latest/policy/CMP0063.html
-cmake_policy(SET CMP0063 NEW)
+#cmake_policy(SET CMP0063 NEW)
 
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
@@ -117,6 +117,7 @@ set(OMICSDS_DEPENDENCIES
   ${OPENSSL_LIBRARIES}
   ${ZLIB_LIBRARIES}
   ${LIBUUID_LIBRARY}
+  -ldl
 )
 
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -g3 -gdwarf-3")

@@ -1,6 +1,4 @@
 /**
- * src/test/cpp/test_omicsds_loader.cc
- *
  * The MIT License (MIT)
  * Copyright (c) 2022 Omics Data Automation, Inc.
  *
@@ -20,22 +18,49 @@
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * Test generic SAM reader
  */
 
-#define CATCH_CONFIG_MAIN
-#include <catch2/catch.hpp>
-#include "test_base.h"
+#pragma once
 
-#include "omicsds_loader.h"
+#include "tiledb_utils.h"
 
-TEST_CASE("test generic SAM reader", "[test_basic]") {
-  read_sam_file(std::string(OMICSDS_TEST_INPUTS)+"empty.sam");
-}
+class TempDir {
+ public:
+  TempDir() {
+    create_temp_directory();
+  }
 
-TEST_CASE_METHOD(TempDir, "test using temp dir", "[test_temp_dir]") {
-  CHECK(TileDBUtils::is_dir(get_temp_dir()));
-  std::string workspace_path = append("workspace");
-  REQUIRE(!TileDBUtils::workspace_exists(workspace_path));
-}
+  ~TempDir() {
+    TileDBUtils::delete_dir(tmp_dirname_);
+  }
+
+  const std::string& get_temp_dir() {
+    return tmp_dirname_;
+  }
+
+  const std::string append(const std::string path) {
+    return append_slash(tmp_dirname_) + path;
+  }
+
+ private:
+  std::string tmp_dirname_;
+
+  const std::string append_slash(const std::string path) {
+    if (path[path.length()-1] == '/') {
+      return path;
+    } else {
+      return path + "/";
+    }
+  }
+
+  void create_temp_directory() {
+    std::string dirname_pattern("OmicsDSXXXXXX");
+    const char *tmp_dir = getenv("TMPDIR");
+    if (tmp_dir == NULL) {
+      tmp_dir = P_tmpdir; // defined in stdio
+    }
+    assert(tmp_dir != NULL);
+    tmp_dirname_ = mkdtemp(const_cast<char *>((append_slash(tmp_dir)+dirname_pattern).c_str()));
+  }
+};
+

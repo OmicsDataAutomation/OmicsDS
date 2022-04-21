@@ -52,7 +52,6 @@ add_dependencies(omicsds_static htslib)
 target_link_libraries(omicsds_static
   tiledb_static
   ${OMICSDS_DEPENDENCIES}
-  pthread
   ${CMAKE_DL_LIBS} # add -ldl
   ) 
 

@@ -1,0 +1,73 @@
+name: build 
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+env:
+  CMAKE_BUILD_TYPE: Coverage
+  CMAKE_BUILD_DIR: ${{github.workspace}}/build
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macOS-10.15]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create Build Environment
+      shell: bash
+      run: |
+        mkdir -p $CMAKE_BUILD_DIR
+
+    - name: Build - Ubuntu
+      if: startsWith(matrix.os,'ubuntu')
+      shell: bash
+      working-directory: ${{env.CMAKE_BUILD_DIR}}
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install cmake lcov
+        sudo apt-get -y install zlib1g-dev libssl-dev uuid-dev libcurl4-openssl-dev zstd
+        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE
+        make -j4
+        make test -j4
+
+    - name: Build - MacOS
+      if: startsWith(matrix.os, 'macOS')
+      shell: bash
+      working-directory: ${{env.CMAKE_BUILD_DIR}}
+      run: |
+        brew list automake &>/dev/null || brew install automake
+        brew list cmake &>/dev/null || brew install cmake
+        brew list lcov &>/dev/null || brew install lcov
+        brew list openssl@1.1 &>/dev/null || brew install openssl@1.1
+        brew list ossp-uuid &>/dev/null || brew install ossp-uuid
+        brew list zstd &>/dev/null || brew install zstd
+        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE -DDISABLE_OPENMP=1
+        make -j4
+        make test -j4
+      env:
+        OPENSSL_ROOT_DIR: /usr/local/opt/openssl@1.1
+
+    - name: Cache AWS SDK
+      uses: actions/cache@v2
+      with:
+        path: ${{env.HOME}}/awssdk-install
+        key: awssdk-v1-${{runner.os}}
+
+    - name: Cache GCS SDK
+      uses: actions/cache@v2
+      with:
+        path: ${{env.HOME}}/gcssdk-install
+        key: gcssdk-v1-${{runner.os}}
+
+    - name: Upload Report to CodeCov
+      uses: codecov/codecov-action@v1
