@@ -1,32 +1,5 @@
-/**
- * src/main/cpp/loader/omicsds_loader.h
- *
- * The MIT License (MIT)
- * Copyright (c) 2022 Omics Data Automation, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of 
- * this software and associated documentation files (the "Software"), to deal in 
- * the Software without restriction, including without limitation the rights to 
- * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
- * the Software, and to permit persons to whom the Software is furnished to do so, 
- * subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all 
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
- * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
- * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * Specification for a generic SAM reader
- */
-
 #pragma once
-
-#include <array>
+//#include <htslib/sam.h>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -36,18 +9,32 @@
 #include <string>
 #include <deque>
 #include <queue>
+#include <set>
 #include <functional>
 #include <sstream>
 #include <regex>
+#include <limits>
 #include <htslib/sam.h>
+#include "tiledb.h"
 #include "tiledb_utils.h"
+#include "tiledb_storage.h"
+
+#define CHECK_RC(...)                                      \
+do {                                                       \
+  int rc = __VA_ARGS__;                                    \
+  if (rc) {                                                \
+    printf("%s", &tiledb_errmsg[0]);                       \
+    printf("[Examples::%s] Runtime Error.\n", __FILE__);   \
+    return rc;                                             \
+  }                                                        \
+} while (false)
 
 void read_sam_file(std::string filename);
 
 struct OmicsFieldInfo {
   enum OmicsFieldType { omics_char, omics_uint8_t, omics_int8_t,
-                                omics_uint16_t, omics_int16_t, omics_uint32_t,
-                                omics_int32_t, omics_uint64_t, omics_int64_t };
+                        omics_uint16_t, omics_int16_t, omics_uint32_t,
+                        omics_int32_t, omics_uint64_t, omics_int64_t };
 
   OmicsFieldInfo(OmicsFieldType type) : type(type) {}
   OmicsFieldType type;
@@ -136,6 +123,13 @@ struct OmicsMultiCell {
 
   OmicsMultiCell() {}
   OmicsMultiCell(std::array<int64_t, 2> coords, std::shared_ptr<OmicsSchema> schema) : coords(coords), schema(schema) {}
+  OmicsMultiCell(const OmicsMultiCell& o) : schema(o.schema),  coords(o.coords), subcells(o.subcells) {}
+  const OmicsMultiCell& operator=(const OmicsMultiCell& o) {
+    schema = o.schema;
+    coords = o.coords;
+    subcells = o.subcells;
+    return *this;
+  }
 
   bool validate_cell(const OmicsCell& cell) {
     return cell.fields.size() == schema->size();
@@ -167,7 +161,7 @@ struct OmicsMultiCell {
   }
 
   bool merge(const OmicsMultiCell& o) {
-    if(!equivalent_schema(*schema, *(o.schema))) {
+    if(!equivalent_schema(*schema, *(o.schema)) || coords != o.coords) {
       return false;
     }
     subcells.insert(subcells.begin(), o.subcells.begin(), o.subcells.end());
@@ -175,6 +169,8 @@ struct OmicsMultiCell {
   }
 
   static OmicsMultiCell create_invalid_cell();
+
+  static bool is_invalid_cell(const OmicsMultiCell& cell);
 
   std::vector<std::vector<uint8_t>> operator[](size_t idx) {
     std::vector<std::vector<uint8_t>> rv;
@@ -190,9 +186,13 @@ struct OmicsMultiCell {
 
     for(auto& sc : subcells) {
       ss << "\tsubcell" << std::endl;
-      for(auto& f : sc.fields) {
-        ss << "\t\tfield" << std::endl << "\t\t\t";
-        for(auto& e : f.data) {
+      //for(auto& f : sc.fields) {
+      auto fiter = sc.fields.begin();
+      auto aiter = schema->begin();
+      for(; fiter != sc.fields.end() && aiter != schema->end(); fiter++, aiter++) {
+        //ss << "\t\tfield" << std::endl << "\t\t\t";
+        ss << "\t\t" << aiter->first << std::endl << "\t\t\t\t";
+        for(auto& e : fiter->data) {
           ss << (int)e << "=" << (char)e << " ";
         }
         ss << std::endl;
@@ -206,16 +206,27 @@ struct OmicsMultiCell {
     return "{" + std::to_string(coords[0]) + ", " + std::to_string(coords[1]) + "}";
   }
 
-  std::vector<int> get_file_idxs() { // returns file indices that are not -1 (not associated to a file/end cell)
-    std::vector<int> rv;
+  std::set<int> get_file_idxs() const { // returns file indices that are not -1 (not associated to a file/end cell)
+    std::set<int> rv;
     for(auto& sc : subcells) {
       if(sc.file_idx >= 0) {
-        rv.push_back(sc.file_idx);
+        rv.insert(sc.file_idx);
       }
     }
     return rv;
   }
 };
+
+template<class T>
+std::string container_to_string(const T& c) {
+  std::stringstream ss;
+
+  for(auto& e : c) {
+    ss << e << " ";
+  }
+
+  return ss.str();
+}
 
 class OmicsFileReader {
   public:
@@ -297,10 +308,30 @@ class OmicsLoader {
       OmicsStorageOrder order = COLUMN_MAJOR,
       const bool superimpose = false
     );
+    ~OmicsLoader() {
+      // Finalize array
+      tiledb_array_finalize(m_tiledb_array);
+
+      // Finalize context
+      tiledb_ctx_finalize(m_tiledb_ctx);
+    }
     void import();// import data from callsets
     //virtual void query() = 0; // query
   protected:
+    int create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major = true);
+    int open_array(const std::string& path);
+    int write_buffers();
     bool m_superimpose; // whether to contain data for multiple logical cells within one cell
+    
+    TileDB_CTX* m_tiledb_ctx;
+    TileDB_Array* m_tiledb_array;
+    std::vector<std::vector<size_t>> offset_buffers;
+    std::vector<std::vector<char>> var_buffers;
+    std::vector<size_t> coords_buffer;
+    size_t buffer_size = 1024;
+
+    void buffer_cell(const OmicsMultiCell& cell);
+
     std::shared_ptr<OmicsSchema> m_schema;
     //std::vector<std::string> m_filenames; // list of input file names
     std::vector<std::shared_ptr<OmicsFileReader>> m_files;
@@ -311,30 +342,27 @@ class OmicsLoader {
     int m_array_descriptor;
     OmicsStorageOrder m_order;
     static bool m_column_major_comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
-      std::cout << "REMOVE *********************************** m_column_major_comparitor" << std::endl;
-      std::cout << _l.coords_to_string() << " > " << _r.coords_to_string() << std::endl;
       auto l = _l.coords;
       auto r = _r.coords;
-      std::cout << "REMOVE " << ((l[1] > r[1]) || (l[1] == r[1] && l[0] > r[0])) << std::endl;
       return (l[1] > r[1]) || (l[1] == r[1] && l[0] > r[0]);
     };
     static bool m_row_major_comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
-      std::cout << "REMOVE *********************************** m_row_major_comparitor" << std::endl;
-      std::cout << _l.coords_to_string() << " > " << _r.coords_to_string() << std::endl;
       auto l = _l.coords;
       auto r = _r.coords;
-      std::cout << "REMOVE " << ((l[0] > r[0]) || (l[0] == r[0] && l[1] > r[1])) << std::endl;
       return (l[0] > r[0]) || (l[0] == r[0] && l[1] > r[1]);
     };
     bool less_than(const std::array<int64_t, 2>& l, const std::array<int64_t, 2>& r) {
       if(m_order == COLUMN_MAJOR) {
-        return (l[1] > r[1]) || (l[1] == r[1] && l[0] > r[0]);
+        return (l[1] < r[1]) || (l[1] == r[1] && l[0] < r[0]);
       }
-      else return (l[0] > r[0]) || (l[0] == r[0] && l[1] > r[1]);
+      else return (l[0] < r[0]) || (l[0] == r[0] && l[1] < r[1]);
     }
     bool less_than(const OmicsMultiCell& l, const OmicsMultiCell& r) {
-      return l.coords < r.coords;
+      return less_than(l.coords, r.coords);
     }
+    void push_from_idxs(const std::set<int>& idxs);
+    void push_files_from_cell(const OmicsMultiCell& cell);
+    void push_from_all_files();
     // bool info_to_cell(const transcriptomics_cell& tc);
     //cell_info next_cell_info(std::ifstream& file, int type, int ind);
     // std::map<std::string, std::pair<long, long>> transcript_map;
