@@ -242,7 +242,7 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
   }
 }
 
-int OmicsLoader::create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major) {
+int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major) {
   // Initialize context with home dir if specified in command line, else
   // initialize with the default configuration parameters
   TileDB_CTX* tiledb_ctx;
@@ -347,7 +347,7 @@ int OmicsLoader::create_array(const std::string& workspace, const std::string& a
   return 0;
 }
 
-int OmicsLoader::open_array(const std::string& path) {
+int OmicsLoader::tiledb_open_array(const std::string& path) {
   CHECK_RC(tiledb_ctx_init(&m_tiledb_ctx, NULL));
 
   // Initialize array
@@ -363,7 +363,7 @@ int OmicsLoader::open_array(const std::string& path) {
   return 0;
 }
 
-int OmicsLoader::write_buffers() {
+int OmicsLoader::tiledb_write_buffers() {
   std::vector<void*> buffers_vec;
   std::vector<size_t> buffer_sizes_vec;
 
@@ -416,8 +416,8 @@ OmicsLoader::OmicsLoader(
   var_buffers = std::vector<std::vector<char>>(m_schema->size());
   coords_buffer.clear();
 
-  create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema, m_order == COLUMN_MAJOR);
-  open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/sparse_arrays/array");
+  tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema, m_order == COLUMN_MAJOR);
+  tiledb_open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/sparse_arrays/array");
 
   std::ifstream f(file_list); // initialize OmicsFileReaders from list of filenames
   std::string s;
@@ -542,8 +542,8 @@ void OmicsLoader::import() {
     }*/
     
   }
-  std::cerr << "REMOVE after while write_buffers" << std::endl;
-  write_buffers();
+  std::cerr << "REMOVE after while tiledb_write_buffers" << std::endl;
+  tiledb_write_buffers();
 
   //if(valid && current_cell.coords[0] >= 0 && current_cell.coords[1] >= 0) { // see if last cell needs to be written to disk
   //  std::cout << current_cell.to_string() << std::endl << std::endl; // FIXME write to disk

@@ -318,9 +318,9 @@ class OmicsLoader {
     void import();// import data from callsets
     //virtual void query() = 0; // query
   protected:
-    int create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major = true);
-    int open_array(const std::string& path);
-    int write_buffers();
+    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major = true);
+    int tiledb_open_array(const std::string& path);
+    int tiledb_write_buffers();
     bool m_superimpose; // whether to contain data for multiple logical cells within one cell
     
     TileDB_CTX* m_tiledb_ctx;
