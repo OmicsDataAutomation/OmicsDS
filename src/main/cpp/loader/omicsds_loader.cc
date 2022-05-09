@@ -493,6 +493,7 @@ void OmicsLoader::import() {
   std::cout << "REMOVE beginning m_pq.size() is " << m_pq.size() << std::endl;
 
   std::array<int64_t, 2> last_coords = { -1, -1 };
+  int level = 0;
 
   while(m_pq.size()) {
     auto cell = m_pq.top();
@@ -521,9 +522,17 @@ void OmicsLoader::import() {
       exit(1);
     }
 
+    if(cell.coords == last_coords) {
+      level++;
+    }
+    else {
+      level = 0;
+      last_coords = cell.coords;
+    }
+
     // write cell
     std::cerr << cell.to_string() << std::endl << std::endl; // FIXME write to disk
-    buffer_cell(cell);
+    buffer_cell(cell, level);
   }
   std::cerr << "REMOVE after while tiledb_write_buffers" << std::endl;
   tiledb_write_buffers();
