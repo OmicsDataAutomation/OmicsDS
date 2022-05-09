@@ -45,7 +45,7 @@ void read_sam_file(std::string filename) {
 
     char *qseq = (char *)malloc(len);
     
-    for(int i=0; i< len ; i++){
+    for(int i=0; i<len; i++){
       qseq[i] = seq_nt16_str[bam_seqi(q,i)]; //gets nucleotide id and converts them into IUPAC id.
     }
     
@@ -76,9 +76,9 @@ void read_sam_file(std::string filename) {
 }
 
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r) {
-  if(l.size() != r.size()) return false;
+  if(l.attributes.size() != r.attributes.size()) return false;
 
-  for(auto li = l.begin(), ri = r.begin(); li != l.end(), ri != r.end(); li++, ri++) {
+  for(auto li = l.attributes.begin(), ri = r.attributes.begin(); li != l.attributes.end(), ri != r.attributes.end(); li++, ri++) {
     if(li->first != ri->first) return false;
     if(li->second.type != ri->second.type) return false;
   }
@@ -158,18 +158,6 @@ bool OmicsFileReader::generalized_getline(std::string& retval) {
   return false;
 }
 
-/*bool OmicsFileReader::manage_buffer() {
-  if(m_cell_buffer.size()) {
-    return true;
-  }
-  auto vec = get_next_cells();
-  for(auto& c : vec) {
-    m_cell_buffer.push_back(c);
-  }
-  std::sort(m_cell_buffer.begin(), m_cell_buffer.end());
-  return (bool)(m_cell_buffer.size());
-}*/
-
 SamReader::SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : OmicsFileReader(filename, schema, file_idx) {
   m_fp = hts_open(filename.c_str(),"r"); //open bam file
   m_hdr = sam_hdr_read(m_fp); //read header
@@ -242,15 +230,9 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
   }
 }
 
-int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major) {
-  // Initialize context with home dir if specified in command line, else
+int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema) {
   // initialize with the default configuration parameters
   TileDB_CTX* tiledb_ctx;
-  /*if (argc > 1) {
-    TileDB_Config tiledb_config;
-    tiledb_config.home_ = argv[1];
-    CHECK_RC(tiledb_ctx_init(&tiledb_ctx, &tiledb_config));
-  } else { }*/
   CHECK_RC(tiledb_ctx_init(&tiledb_ctx, NULL));
 
   // Create a workspace
@@ -265,13 +247,18 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
 
   // Prepare parameters for array schema
   std::vector<const char*> attributes_vec;
-  for(auto&p : schema) {
+  std::vector<int32_t> cell_val_num_vec;
+  std::vector<int32_t> types_vec;
+  for(auto&p : schema.attributes) {
     std::cerr << "REMOVE aname is " << p.first << std::endl;
     std::cerr << "REMOVE c_str is " << p.first.c_str() << std::endl;
     std::cerr << "REMOVE address is " << (int64_t)p.first.c_str() << std::endl;
     attributes_vec.push_back(p.first.c_str());
+    cell_val_num_vec.push_back(p.second.length);
+    types_vec.push_back(p.second.tiledb_type());
     std::cerr << "REMOVE vec 1 " << container_to_string(attributes_vec) << std::endl;
   }
+  types_vec.push_back(TILEDB_INT64); // coords
 
   std::cerr << "REMOVE vec 2 " << container_to_string(attributes_vec) << std::endl;
   std::cerr << "REMOVE first attribute address is " << (int64_t)(attributes_vec[0]) << std::endl;
@@ -279,35 +266,41 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
   std::cerr << "REMOVE len is " << strlen(attributes_vec[0]) << std::endl;
 
   const char** attributes = attributes_vec.data();
+  const int* cell_val_num = cell_val_num_vec.data();
+  const int* types = types_vec.data();
 
-  int32_t order = column_major ? TILEDB_COL_MAJOR : TILEDB_ROW_MAJOR;
+  int32_t order = TILEDB_ROW_MAJOR; // different orders are implemented by reordering coordinates
 
-  const char* dimensions[] = { "SAMPLE" , "POSITION" };  // Two dimensions
+  const char* dimensions[3];
+  dimensions[2] = "LEVEL";
+  if(schema.position_major()) {
+    dimensions[0] = "POSITION";
+    dimensions[1] = "SAMPLE";
+  }
+  else {
+    dimensions[0] = "SAMPLE";
+    dimensions[1] = "POSITION";
+  }
 
   int64_t domain[] =
   {
-      0, std::numeric_limits<int64_t>::max(),            // SAMPLE limits
-      0, std::numeric_limits<int64_t>::max()             // POSITION limits
+      0, std::numeric_limits<int64_t>::max(),            // 1st dimension limits (SAMPLE or POSITION based on order)
+      0, std::numeric_limits<int64_t>::max(),            // 2nd dimension limits
+      0, std::numeric_limits<int64_t>::max()             // LaVEL limits
   };
 
-  std::vector<int32_t> cell_val_num_vec(schema.size(), TILEDB_VAR_NUM);
-  const int* cell_val_num = cell_val_num_vec.data();     // Encode all as variable char to better support superimposing cells
-
-  std::vector<int32_t> compression_vec(schema.size() + 1, TILEDB_NO_COMPRESSION); // plus 1 for coordinates
+  std::vector<int32_t> compression_vec(schema.attributes.size() + 1, TILEDB_NO_COMPRESSION); // plus 1 for coordinates
   const int* compression = compression_vec.data();
 
-  std::vector<int32_t> offsets_compression_vec(schema.size(), TILEDB_NO_COMPRESSION);
+  std::vector<int32_t> offsets_compression_vec(schema.attributes.size(), TILEDB_NO_COMPRESSION);
   const int* offsets_compression = offsets_compression_vec.data();
 
   int64_t tile_extents[] =
   {
-      1,                                                 // SAMPLE extents
-      1                                                  // POSIION extents
+      1,                                                 // 1st dimension extents
+      1,                                                 // 2nd dimension  extents
+      1                                                  // LEVEL extents
   };
-
-  std::vector<int32_t> types_vec(schema.size(), TILEDB_CHAR);
-  types_vec.push_back(TILEDB_INT64);
-  const int* types = types_vec.data();                   // Encode all as variable char to better support superimposing cells, except for coords
 
   // Set array schema
   TileDB_ArraySchema array_schema;
@@ -315,7 +308,7 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
       &array_schema,                                     // Array schema struct
       full_name.c_str(),                                 // Array name
       attributes,                                        // Attributes
-      schema.size(),                                     // Number of attributes
+      schema.attributes.size(),                          // Number of attributes
       std::numeric_limits<int64_t>::max(),               // Capacity
       //50,                                                // Capacity
       order,                                             // Cell order
@@ -326,11 +319,11 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
       NULL,                                              // Offsets compression level
       0,                                                 // Sparse array
       dimensions,                                        // Dimensions
-      2,                                                 // Number of dimensions
+      3,                                                 // Number of dimensions
       domain,                                            // Domain
-      4*sizeof(int64_t),                                 // Domain length in bytes
+      6*sizeof(int64_t),                                 // Domain length in bytes
       tile_extents,                                      // Tile extents
-      2*sizeof(int64_t),                                 // Tile extents length in bytes
+      4*sizeof(int64_t),                                 // Tile extents length in bytes
       order,                                             // Tile order
       types                                              // Types
   );
@@ -367,16 +360,18 @@ int OmicsLoader::tiledb_write_buffers() {
   std::vector<void*> buffers_vec;
   std::vector<size_t> buffer_sizes_vec;
 
-  for(size_t i = 0; i < m_schema->size(); i++) {
+  int i = 0;
+  for(auto it = m_schema->attributes.begin(); it != m_schema->attributes.end(); it++, i++) {
     buffers_vec.push_back(offset_buffers[i].data());
-    buffers_vec.push_back(var_buffers[i].data());
-
     buffer_sizes_vec.push_back(offset_buffers[i].size());
-    buffer_sizes_vec.push_back(var_buffers[i].size());
+
+    if(it->second.length == -1) {
+      buffers_vec.push_back(var_buffers[i].data());
+      buffer_sizes_vec.push_back(var_buffers[i].size());
+    }
   }
 
   buffers_vec.push_back(coords_buffer.data());
-
   buffer_sizes_vec.push_back(sizeof(int64_t) * coords_buffer.size());  
 
   // Write to array
@@ -385,41 +380,60 @@ int OmicsLoader::tiledb_write_buffers() {
   return 0;
 }
 
-void OmicsLoader::buffer_cell(const OmicsMultiCell& cell) {
+void OmicsLoader::buffer_cell(const OmicsMultiCell& cell, int level) {
   for(auto& sc : cell.subcells) {
-    for(size_t i = 0; i < sc.fields.size(); i++) {
-      auto& data = sc.fields[i].data;
+    auto fiter = sc.fields.begin();
+    auto aiter = m_schema->attributes.begin();
+    int i = 0;
+    for(; fiter != sc.fields.end() && aiter != m_schema->attributes.end(); fiter++, aiter++, i++) {
+      auto& data = fiter->data;
 
-      offset_buffers[i].push_back(var_buffers[i].size());
-      for(auto& c : data) {
-        var_buffers[i].push_back(c);
+      int length = aiter->second.length;
+      int size = aiter->second.element_size();
+      if(length == -1) { // variable length
+        offset_buffers[i].push_back(var_buffers[i].size());
+        for(auto& c : data) {
+          var_buffers[i].push_back(c);
+        }
+      }
+      else {
+        assert(data.size() == size * length);
+        for(auto& c : data) {
+          offset_buffers[i].push_back(c);
+        }
       }
     }
     coords_buffer.push_back(cell.coords[0]);
     coords_buffer.push_back(cell.coords[1]);
+    coords_buffer.push_back(level);
   }
+}
+
+void ReadCountLoader::create_schema() {
+  m_schema->attributes.emplace("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("QNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("FLAG", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint16_t, 1));
 }
 
 // FIXME add parallelism of some kind
 // FIXME 
 OmicsLoader::OmicsLoader(
                          const std::string& file_list,
-                         OmicsStorageOrder order,
-                         const bool superimpose
-                        ): m_order(order), m_superimpose(superimpose), m_pq(((order == COLUMN_MAJOR) ? m_column_major_comparitor : m_row_major_comparitor)), m_schema(std::make_shared<OmicsSchema>()) {
-  // FIXME create schema somewhere virtual
-  m_schema->emplace("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char));
-  m_schema->emplace("QNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char));
-  m_schema->emplace("FLAG", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint16_t));
+                         bool position_major
+                        ): m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(position_major)) {}
 
-  offset_buffers = std::vector<std::vector<size_t>>(m_schema->size());
-  var_buffers = std::vector<std::vector<char>>(m_schema->size());
+void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
+  create_schema();
+
+  offset_buffers = std::vector<std::vector<size_t>>(m_schema->attributes.size());
+  var_buffers = std::vector<std::vector<char>>(m_schema->attributes.size());
   coords_buffer.clear();
 
-  tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema, m_order == COLUMN_MAJOR);
+  // FIXME don't hardcode
+  tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema);
   tiledb_open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/sparse_arrays/array");
 
-  std::ifstream f(file_list); // initialize OmicsFileReaders from list of filenames
+  std::ifstream f(m_file_list); // initialize OmicsFileReaders from list of filenames
   std::string s;
   while(std::getline(f, s)) {
     if(TileDBUtils::is_file(s)) {
@@ -445,6 +459,7 @@ void OmicsLoader::push_from_all_files() {
     std::cout << "REMOVE pushing cells from file " << f->get_filename() << std::endl;
     for(auto& c : cells) {
       if(OmicsMultiCell::is_invalid_cell(c)) continue;
+      c.coords = m_schema->standard_to_schema_order(c.coords);
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
     }
@@ -459,6 +474,7 @@ void OmicsLoader::push_from_idxs(const std::set<int>& idxs) {
     std::cout << "REMOVE pushing cells from file " << idx << std::endl;
     for(auto& c : cells) {
       if(OmicsMultiCell::is_invalid_cell(c)) continue;
+      c.coords = m_schema->standard_to_schema_order(c.coords);
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
     }
@@ -475,6 +491,9 @@ void OmicsLoader::import() {
   //bool valid = false; // whether value of current_cell is meaningfull
   
   std::cout << "REMOVE beginning m_pq.size() is " << m_pq.size() << std::endl;
+
+  std::array<int64_t, 2> last_coords = { -1, -1 };
+
   while(m_pq.size()) {
     auto cell = m_pq.top();
     std::cout << "\t\t\tREMOVE top coords are " << container_to_string(m_pq.top().coords) << std::endl;
@@ -486,14 +505,14 @@ void OmicsLoader::import() {
     }
 
     // read cells until top of pq is later
-    while(m_pq.size() && m_pq.top().coords == cell.coords) {
+    /*while(m_pq.size() && m_pq.top().coords == cell.coords) {
       std::cout << "\t\t\tREMOVE in while, temp coords are " << container_to_string(m_pq.top().coords) << std::endl;
       OmicsMultiCell temp(m_pq.top());
       m_pq.pop();
       push_files_from_cell(temp); // make sure that all files are still represented in pq
 
       cell.merge(temp);
-    }
+    }*/
 
     if(less_than(m_pq.top(), cell)) {
       std::cerr << "Error, top of priority queue is less than previous cell" << std::endl;
@@ -505,42 +524,6 @@ void OmicsLoader::import() {
     // write cell
     std::cerr << cell.to_string() << std::endl << std::endl; // FIXME write to disk
     buffer_cell(cell);
-
-    /*auto reader = m_pq.top();
-    m_pq.pop(); // get file reader with next cell in sorted order
-    auto ival = reader->peek(); // get interval
-
-    if(ival[0] < 0 || ival[1] < 0) { // end of file, do not replace in m_pq
-      continue;
-    }
-
-    if(!valid) {
-      current_cell = reader->pop(); // get next cell
-      valid = true;
-      m_pq.push(reader); // replace reader in m_pq
-      continue;
-    }
-    else {
-      if(less_than(ival, current_cell.coords)) { // files are all assumed to be in sorted order
-        std::cerr << "Error: cell {" << ival[0] << ", " << ival[1] << "} from file " << reader->get_filename() << " preceeds last processed cell {" << current_cell.coords[0] << ", " << current_cell.coords[1] << "}" << std::endl;
-        exit(1);
-      }
-      else if(ival == current_cell.coords) { // next cell overlaps with current, attempt to merge
-        if(!current_cell.merge(reader->pop())) {
-          std::cerr << "Error: schema of cell from file " << reader->get_filename() << " does not match that of last processed cell" << std::endl;
-          exit(1);
-        }
-        else { // merge was successful, replace reader in m_pq
-          m_pq.push(reader);
-        }
-      }
-      else { // next cell is after current, write current cell, replace current cell, and replace reader
-        std::cout << current_cell.to_string() << std::endl << std::endl; // FIXME write to disk
-        current_cell = reader->pop();
-        m_pq.push(reader);
-      }
-    }*/
-    
   }
   std::cerr << "REMOVE after while tiledb_write_buffers" << std::endl;
   tiledb_write_buffers();

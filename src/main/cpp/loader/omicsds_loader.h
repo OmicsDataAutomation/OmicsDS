@@ -14,6 +14,7 @@
 #include <sstream>
 #include <regex>
 #include <limits>
+#include <cassert>
 #include <htslib/sam.h>
 #include "tiledb.h"
 #include "tiledb_utils.h"
@@ -36,8 +37,40 @@ struct OmicsFieldInfo {
                         omics_uint16_t, omics_int16_t, omics_uint32_t,
                         omics_int32_t, omics_uint64_t, omics_int64_t };
 
-  OmicsFieldInfo(OmicsFieldType type) : type(type) {}
+  OmicsFieldInfo(OmicsFieldType type, int length) : type(type), length(length) {}
   OmicsFieldType type;
+  int length; // number of elements, -1 encodes variable
+
+  int tiledb_type() const {
+    switch(type) {
+      case omics_char:     return TILEDB_CHAR;
+      case omics_uint8_t:  return TILEDB_UINT8;
+      case omics_int8_t:   return TILEDB_INT8;
+      case omics_uint16_t: return TILEDB_UINT16;
+      case omics_int16_t:  return TILEDB_INT16;
+      case omics_uint32_t: return TILEDB_UINT32;
+      case omics_int32_t:  return TILEDB_INT32;
+      case omics_uint64_t: return TILEDB_UINT64;
+      case omics_int64_t:  return TILEDB_INT64;
+    }
+    return TILEDB_CHAR;
+  }
+
+  int element_size() {
+    switch(type) {
+      case omics_char:     return 1;
+      case omics_uint8_t:  return 1;
+      case omics_int8_t:   return 1;
+      case omics_uint16_t: return 2;
+      case omics_int16_t:  return 2;
+      case omics_uint32_t: return 4;
+      case omics_int32_t:  return 4;
+      case omics_uint64_t: return 8;
+      case omics_int64_t:  return 8;
+    }
+    return 1;
+  }
+
   bool operator==(const OmicsFieldInfo& o) {
     return type == o.type;
   }
@@ -71,7 +104,33 @@ struct OmicsFieldData {
   }
 };
 
-typedef std::map<std::string, OmicsFieldInfo> OmicsSchema; // implies canonical order
+struct OmicsSchema {
+  enum OmicsStorageOrder { POSITION_MAJOR, SAMPLE_MAJOR };
+  OmicsStorageOrder order;
+
+  OmicsSchema(OmicsStorageOrder order = POSITION_MAJOR): order(order) {}
+  OmicsSchema(bool position_major = true) {
+    order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
+  }
+  bool position_major() const {
+    return order == POSITION_MAJOR;
+  }
+  // standard order is SAMPLE, POSITION, will swap if position major
+  std::array<int64_t, 2> standard_to_schema_order(const std::array<int64_t, 2>& coords) {
+    std::array<int64_t, 2> retval;
+    if(position_major()) {
+      retval[0] = coords[1];
+      retval[1] = coords[0];
+    }
+    else {
+      retval[0] = coords[0];
+      retval[1] = coords[1];
+    }
+    // return position_major() ? std::array<int64_t, 2>(coords[1], coords[0]) : coords;
+    return retval;
+  }
+  std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order
+};
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
 struct OmicsCell {
@@ -79,7 +138,7 @@ struct OmicsCell {
   std::shared_ptr<OmicsSchema> schema;
   int file_idx = -1;
 
-  OmicsCell(std::shared_ptr<OmicsSchema> schema, int file_idx) : schema(schema), file_idx(file_idx), fields(std::vector<OmicsFieldData>(schema->size())) {}
+  OmicsCell(std::shared_ptr<OmicsSchema> schema, int file_idx) : schema(schema), file_idx(file_idx), fields(std::vector<OmicsFieldData>(schema->attributes.size())) {}
   OmicsCell(OmicsCell&& o) : schema(o.schema), fields(std::move(o.fields)), file_idx(o.file_idx) {}
   OmicsCell(const OmicsCell& o) : schema(o.schema), fields(o.fields), file_idx(o.file_idx) {}
   OmicsCell& operator=(const OmicsCell& o) {
@@ -93,10 +152,10 @@ struct OmicsCell {
   bool add_field(std::string name, T elem) { // helper function to place field in correct position, if in schema
     if(!schema) return false;
 
-    auto it = schema->find(name);
-    if(it == schema->end()) return false;
+    auto it = schema->attributes.find(name);
+    if(it == schema->attributes.end()) return false;
 
-    size_t idx = std::distance(schema->begin(), it);
+    size_t idx = std::distance(schema->attributes.begin(), it);
     fields[idx].push_back(elem);
     return true;
   }
@@ -105,10 +164,10 @@ struct OmicsCell {
   bool add_field_ptr(std::string name, T* elem_ptr, int n) {
     if(!schema) return false;
 
-    auto it = schema->find(name);
-    if(it == schema->end()) return false;
+    auto it = schema->attributes.find(name);
+    if(it == schema->attributes.end()) return false;
 
-    size_t idx = std::distance(schema->begin(), it);
+    size_t idx = std::distance(schema->attributes.begin(), it);
     fields[idx].push_pointer_back(elem_ptr, n);
     return true;
   }
@@ -132,7 +191,7 @@ struct OmicsMultiCell {
   }
 
   bool validate_cell(const OmicsCell& cell) {
-    return cell.fields.size() == schema->size();
+    return cell.fields.size() == schema->attributes.size();
   }
 
   size_t push_back(OmicsCell&& elem) {
@@ -188,8 +247,8 @@ struct OmicsMultiCell {
       ss << "\tsubcell" << std::endl;
       //for(auto& f : sc.fields) {
       auto fiter = sc.fields.begin();
-      auto aiter = schema->begin();
-      for(; fiter != sc.fields.end() && aiter != schema->end(); fiter++, aiter++) {
+      auto aiter = schema->attributes.begin();
+      for(; fiter != sc.fields.end() && aiter != schema->attributes.end(); fiter++, aiter++) {
         //ss << "\t\tfield" << std::endl << "\t\t\t";
         ss << "\t\t" << aiter->first << std::endl << "\t\t\t\t";
         for(auto& e : fiter->data) {
@@ -241,42 +300,17 @@ class OmicsFileReader {
       delete[] m_buffer;
     }
 
-    /*const std::array<int64_t, 2> peek() {
-      if(manage_buffer()) {
-        return {-1, -1};
-      }
-
-      return m_cell_buffer.front().coords;
-    }*/
-
-    /*OmicsMultiCell pop() {
-      OmicsMultiCell rv;
-
-      if(!manage_buffer()) {
-        rv.coords = {-1, -1};
-      }
-      else {
-        rv = m_cell_buffer.front();
-        m_cell_buffer.pop_front();
-      }
-
-      return rv;
-    }*/
-
     const std::string& get_filename() {
       return m_filename;
     }
 
     //OmicsMultiCell next_cell_info();
-    virtual std::vector<OmicsMultiCell> get_next_cells() = 0;
+    virtual std::vector<OmicsMultiCell> get_next_cells() = 0; // standard order for coords is SAMPLE, POSITION, will be transformed by loader
 
   protected:
     std::shared_ptr<OmicsSchema> m_schema;
     int m_file_idx;
     std::string m_filename;
-    //std::deque<OmicsMultiCell> m_cell_buffer;
-    //bool manage_buffer();
-    //std::ifstream m_file;
     ssize_t m_file_size = 0;
     ssize_t m_chars_read = 0;
     bool generalized_getline(std::string& retval);
@@ -302,11 +336,9 @@ class SamReader : public OmicsFileReader {
 // support as intervals cannot always be prevented from overlapping
 class OmicsLoader {
   public:
-    enum OmicsStorageOrder { COLUMN_MAJOR, ROW_MAJOR };
     OmicsLoader(
       const std::string& file_list,
-      OmicsStorageOrder order = COLUMN_MAJOR,
-      const bool superimpose = false
+      bool position_major
     );
     ~OmicsLoader() {
       // Finalize array
@@ -316,9 +348,11 @@ class OmicsLoader {
       tiledb_ctx_finalize(m_tiledb_ctx);
     }
     void import();// import data from callsets
+    virtual void create_schema() = 0;
+    void initialize(); // cannot be part of constructor because it invokes create_schema, which is virtual
     //virtual void query() = 0; // query
   protected:
-    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema, bool column_major = true);
+    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
     int tiledb_open_array(const std::string& path);
     int tiledb_write_buffers();
     bool m_superimpose; // whether to contain data for multiple logical cells within one cell
@@ -326,13 +360,14 @@ class OmicsLoader {
     TileDB_CTX* m_tiledb_ctx;
     TileDB_Array* m_tiledb_array;
     std::vector<std::vector<size_t>> offset_buffers;
-    std::vector<std::vector<char>> var_buffers;
+    std::vector<std::vector<char>> var_buffers; // entries for constant length attributes will be empty
     std::vector<size_t> coords_buffer;
     size_t buffer_size = 1024;
 
-    void buffer_cell(const OmicsMultiCell& cell);
+    void buffer_cell(const OmicsMultiCell& cell, int level = 0);
 
     std::shared_ptr<OmicsSchema> m_schema;
+    std::string m_file_list;
     //std::vector<std::string> m_filenames; // list of input file names
     std::vector<std::shared_ptr<OmicsFileReader>> m_files;
     typedef std::shared_ptr<OmicsFileReader> omics_fptr;
@@ -340,22 +375,14 @@ class OmicsLoader {
     std::priority_queue<OmicsMultiCell, std::vector<OmicsMultiCell>, std::function<bool(OmicsMultiCell, OmicsMultiCell)>> m_pq;
     int m_idx;
     int m_array_descriptor;
-    OmicsStorageOrder m_order;
-    static bool m_column_major_comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
-      auto l = _l.coords;
-      auto r = _r.coords;
-      return (l[1] > r[1]) || (l[1] == r[1] && l[0] > r[0]);
-    };
-    static bool m_row_major_comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
+    static bool comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
       auto l = _l.coords;
       auto r = _r.coords;
       return (l[0] > r[0]) || (l[0] == r[0] && l[1] > r[1]);
-    };
+    }
+
     bool less_than(const std::array<int64_t, 2>& l, const std::array<int64_t, 2>& r) {
-      if(m_order == COLUMN_MAJOR) {
-        return (l[1] < r[1]) || (l[1] == r[1] && l[0] < r[0]);
-      }
-      else return (l[0] < r[0]) || (l[0] == r[0] && l[1] < r[1]);
+      return (l[0] < r[0]) || (l[0] == r[0] && l[1] < r[1]);
     }
     bool less_than(const OmicsMultiCell& l, const OmicsMultiCell& r) {
       return less_than(l.coords, r.coords);
@@ -363,11 +390,15 @@ class OmicsLoader {
     void push_from_idxs(const std::set<int>& idxs);
     void push_files_from_cell(const OmicsMultiCell& cell);
     void push_from_all_files();
-    // bool info_to_cell(const transcriptomics_cell& tc);
-    //cell_info next_cell_info(std::ifstream& file, int type, int ind);
-    // std::map<std::string, std::pair<long, long>> transcript_map;
-    // void read_uncompressed_gtf(std::istream& input, std::string format);
-    // void read_compressed_gtf(std::string filename);
-    // void serialize_transcript_map(std::ostream& output);
-    // void deserialize_transcript_map(std::istream&);
+};
+
+class ReadCountLoader : public OmicsLoader {
+  public:
+    ReadCountLoader(
+      const std::string& file_list,
+      bool position_major
+    ) : OmicsLoader(file_list, position_major) {
+      initialize();
+    }
+    virtual void create_schema() override;
 };
