@@ -37,7 +37,14 @@ struct OmicsFieldInfo {
                         omics_uint16_t, omics_int16_t, omics_uint32_t,
                         omics_int32_t, omics_uint64_t, omics_int64_t };
 
-  OmicsFieldInfo(OmicsFieldType type, int length) : type(type), length(length) {}
+  OmicsFieldInfo(OmicsFieldType type, int _length) : type(type) {
+    if(_length < 0) {
+      length = TILEDB_VAR_NUM;
+    }
+    else {
+      length = _length;
+    }
+  }
   OmicsFieldType type;
   int length; // number of elements, -1 encodes variable
 
@@ -111,6 +118,9 @@ struct OmicsSchema {
   OmicsSchema(OmicsStorageOrder order = POSITION_MAJOR): order(order) {}
   OmicsSchema(bool position_major = true) {
     order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
+  }
+  ~OmicsSchema() {
+    std::cerr << "REMOVE schema destructor called" << std::endl;
   }
   bool position_major() const {
     return order == POSITION_MAJOR;
@@ -341,11 +351,7 @@ class OmicsLoader {
       bool position_major
     );
     ~OmicsLoader() {
-      // Finalize array
-      tiledb_array_finalize(m_tiledb_array);
-
-      // Finalize context
-      tiledb_ctx_finalize(m_tiledb_ctx);
+      tiledb_close_array();
     }
     void import();// import data from callsets
     virtual void create_schema() = 0;
@@ -353,7 +359,8 @@ class OmicsLoader {
     //virtual void query() = 0; // query
   protected:
     int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
-    int tiledb_open_array(const std::string& path);
+    int tiledb_open_array(const std::string& path, bool write = true);
+    int tiledb_close_array();
     int tiledb_write_buffers();
     bool m_superimpose; // whether to contain data for multiple logical cells within one cell
     

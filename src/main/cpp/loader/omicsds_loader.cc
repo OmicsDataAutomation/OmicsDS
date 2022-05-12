@@ -166,6 +166,8 @@ SamReader::SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, 
   if(!m_hdr) {
     std::cout << "SamReader header is null" << std::endl;
   }
+
+  assert((bool)schema);
 }
 
 SamReader::~SamReader() {
@@ -200,7 +202,7 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
     int32_t rnext = m_align->core.mtid;
     int32_t pnext = m_align->core.mpos;
     int32_t tlen = m_align->core.isize;
-    std::vector<uint8_t> qseq(len);
+    std::vector<char> qseq(len);
 
     for(int i=0; i< len ; i++){
       qseq[i] = seq_nt16_str[bam_seqi(q,i)]; //gets nucleotide id and converts them into IUPAC id.
@@ -210,10 +212,23 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
 
     int64_t position = std::stol(chr) * 100000000 + pos; // FIXME use acutal mapping
 
+    std::cerr << "\t\t\t\tREMOVE rname len " << std::strlen(chr) << std::endl;
+    std::cerr << "\t\t\t\tREMOVE cigar len " << n_cigar << std::endl;
+
     OmicsMultiCell cell({ (int64_t)m_file_idx, position}, m_schema);
     cell.push_empty_cell(m_file_idx);
-    cell.subcells[0].add_field("FLAG", flag);
     cell.subcells[0].add_field_ptr("QNAME", qname, std::strlen(qname));
+    cell.subcells[0].add_field("FLAG", flag);
+    cell.subcells[0].add_field_ptr("RNAME", chr, std::strlen(chr));
+    cell.subcells[0].add_field("POS", pos);
+    cell.subcells[0].add_field("MAPQ", mapq);
+    cell.subcells[0].add_field_ptr("CIGAR", cigar, n_cigar);
+    cell.subcells[0].add_field("RNEXT", rnext);
+    cell.subcells[0].add_field("PNEXT", pnext);
+    cell.subcells[0].add_field("TLEN", tlen);
+    cell.subcells[0].add_field_ptr("SEQ", qseq.data(), (int)qseq.size());
+    cell.subcells[0].add_field_ptr("QUAL", qual, std::strlen(qual));
+  
 
     OmicsMultiCell end_cell = cell;
     end_cell.subcells[0].file_idx = -1;
@@ -340,7 +355,7 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
   return 0;
 }
 
-int OmicsLoader::tiledb_open_array(const std::string& path) {
+int OmicsLoader::tiledb_open_array(const std::string& path, bool write) {
   CHECK_RC(tiledb_ctx_init(&m_tiledb_ctx, NULL));
 
   // Initialize array
@@ -348,10 +363,22 @@ int OmicsLoader::tiledb_open_array(const std::string& path) {
       m_tiledb_ctx,                                      // Context
       &m_tiledb_array,                                   // Array object
       path.c_str(),                                      // Array name
-      TILEDB_ARRAY_WRITE,                                // Mode
+      write ? TILEDB_ARRAY_WRITE : TILEDB_ARRAY_READ,    // Mode
       NULL,                                              // Entire domain
       NULL,                                              // All attributes
       0));                                               // Number of attributes
+
+  return 0;
+}
+
+int OmicsLoader::tiledb_close_array() {
+  // Finalize array
+  if(m_tiledb_array) CHECK_RC(tiledb_array_finalize(m_tiledb_array));
+  m_tiledb_array = 0;
+
+  // Finalize context
+  if(m_tiledb_ctx) CHECK_RC(tiledb_ctx_finalize(m_tiledb_ctx));
+  m_tiledb_ctx = 0;
 
   return 0;
 }
@@ -365,7 +392,7 @@ int OmicsLoader::tiledb_write_buffers() {
     buffers_vec.push_back(offset_buffers[i].data());
     buffer_sizes_vec.push_back(offset_buffers[i].size());
 
-    if(it->second.length == -1) {
+    if(it->second.length == TILEDB_VAR_NUM) {
       buffers_vec.push_back(var_buffers[i].data());
       buffer_sizes_vec.push_back(var_buffers[i].size());
     }
@@ -390,7 +417,7 @@ void OmicsLoader::buffer_cell(const OmicsMultiCell& cell, int level) {
 
       int length = aiter->second.length;
       int size = aiter->second.element_size();
-      if(length == -1) { // variable length
+      if(length == TILEDB_VAR_NUM) { // variable length
         offset_buffers[i].push_back(var_buffers[i].size());
         for(auto& c : data) {
           var_buffers[i].push_back(c);
@@ -413,6 +440,15 @@ void ReadCountLoader::create_schema() {
   m_schema->attributes.emplace("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
   m_schema->attributes.emplace("QNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
   m_schema->attributes.emplace("FLAG", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint16_t, 1));
+  m_schema->attributes.emplace("RNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("POS", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+  m_schema->attributes.emplace("MAPQ", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint8_t, 1));
+  m_schema->attributes.emplace("CIGAR", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint32_t, -1));
+  m_schema->attributes.emplace("RNEXT", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+  m_schema->attributes.emplace("PNEXT", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+  m_schema->attributes.emplace("TLEN", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+  m_schema->attributes.emplace("SEQ", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("QUAL", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
 }
 
 // FIXME add parallelism of some kind
