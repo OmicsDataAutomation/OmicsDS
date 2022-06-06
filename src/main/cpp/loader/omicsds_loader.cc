@@ -1,5 +1,51 @@
 #include "omicsds_loader.h"
 
+std::vector<std::string> split(std::string str, std::string sep) {
+  std::vector<std::string> retval;
+  int index;
+
+  if(str.length() >= 2) {
+    if(str[0] == '[') {
+       str = str.substr(1, str.length() - 2);
+    }
+  }
+
+  while((index = str.find(sep)) != std::string::npos) {
+    retval.push_back(str.substr(0, index));
+    str.erase(0, index + 1);
+  }
+  retval.push_back(str);
+
+  return retval;
+}
+
+bool FileReaderUtility::generalized_getline(std::string& retval) {
+  retval = "";
+
+  while(chars_read < file_size || str_buffer.size()) {
+    int idx = str_buffer.find('\n');
+    if(idx != std::string::npos) {
+      retval = retval + str_buffer.substr(0, idx); // exclude newline
+      str_buffer.erase(0, idx + 1); // erase newline
+      return true;
+    }
+
+    retval = retval + str_buffer;
+    str_buffer.clear();
+
+    int chars_to_read = std::min<ssize_t>(buffer_size, file_size - chars_read);
+
+    if(chars_to_read) {
+      TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
+       chars_read += chars_to_read;
+    }
+
+    str_buffer.insert(str_buffer.end(), buffer, buffer + chars_to_read);
+  }
+
+  return false;
+}
+
 void read_sam_file(std::string filename) {
   std::cerr << "SAM file is " << filename << std::endl;
 
@@ -75,6 +121,82 @@ void read_sam_file(std::string filename) {
   sam_close(fp_in);
 }
 
+GenomicMap::GenomicMap(const std::string& mapping_file): m_mapping_reader(mapping_file) {
+  std::string str;
+  int line_num = -1;
+  while(m_mapping_reader.generalized_getline(str)) {
+    line_num++;
+
+    auto toks = split(str, "\t");
+    if(toks.size() < 3) {
+      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader.filename << " does not contain enough fields (at least 3), make sure the file is tab separated" << std::endl;
+      continue;
+    }
+
+    std::string contig_name;
+    uint64_t length;
+    uint64_t starting_index;
+
+    try {
+      contig_name = toks[0];
+      length = std::stol(toks[1]);
+      starting_index = std::stol(toks[2]);
+    }
+    catch(...) {
+      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader.filename << " could not be parsed (2nd or 3rd field was not a valid uint64_t)" << std::endl;
+      continue;
+    }
+
+    contigs.emplace_back(contig_name, length, starting_index);
+  }
+
+  idxs_name.resize(contigs.size());
+  std::iota(idxs_name.begin(), idxs_name.end(), 0);
+  std::sort(idxs_name.begin(), idxs_name.end(), [&](auto l, auto r) { return contigs[l].name < contigs[r].name; });
+
+  idxs_position.resize(contigs.size());
+  std::iota(idxs_position.begin(), idxs_position.end(), 0);
+  std::sort(idxs_position.begin(), idxs_position.end(), [&](auto l, auto r) { return contigs[l].starting_index < contigs[r].starting_index; });
+
+  std::cout << "REMOVE" << std::endl;
+  for(auto& c : contigs) {
+    std::cout << "(" << c.name << ", " << c.length << ", " << c.starting_index << ")" << std::endl;
+  }
+  std::cout << std::endl << std::endl;
+
+  std::cout << "name orders" << std::endl;
+  for(auto& i : idxs_name) {
+    std::cout << i << std::endl;
+  }
+  std::cout << std::endl << std::endl;
+
+  std::cout << "position orders" << std::endl;
+  for(auto& i : idxs_position) {
+    std::cout << i << std::endl;
+  }
+  std::cout << std::endl << std::endl;
+}
+
+uint64_t GenomicMap::flatten(std::string contig_name, uint64_t offset) {
+  auto it = std::lower_bound(idxs_name.begin(), idxs_name.end(), contig_name, [&](auto l, auto r) { return contigs[l].name < r; });
+
+  //int idx = std::distance(idxs_name.begin(), it);
+
+  if(it != idxs_name.end() && contigs[*it].name == contig_name) {
+    if(offset < contigs[*it].length) {
+      return contigs[*it].starting_index + offset;
+    }
+    else {
+      std::cerr << "Error, contig " << contig_name << " is only length " << contigs[*it].length << ", " << offset << "is out of bounds" << std::endl;
+      exit(1);
+    }
+  }
+  else {
+    std::cerr << "Error, contig " << contig_name << " not found in mapping file " << m_mapping_reader.filename << std::endl;
+    exit(1);
+  }
+}
+
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r) {
   if(l.attributes.size() != r.attributes.size()) return false;
 
@@ -129,35 +251,6 @@ bool OmicsMultiCell::is_invalid_cell(const OmicsMultiCell& cell) {
   return cell.coords[0] < 0 || cell.coords[1] < 0;
 }
 
-// get line using TileDBUtils api to work with cloud storage as well
-// return value indicates if line was read
-bool OmicsFileReader::generalized_getline(std::string& retval) {
-  retval = "";
-
-  while(m_chars_read < m_file_size || m_str_buffer.size()) {
-    int idx = m_str_buffer.find('\n');
-    if(idx != std::string::npos) {
-      retval = retval + m_str_buffer.substr(0, idx); // exclude newline
-      m_str_buffer.erase(0, idx + 1); // erase newline
-      return true;
-    }
-
-    retval = retval + m_str_buffer;
-    m_str_buffer.clear();
-
-    int chars_to_read = std::min<ssize_t>(m_buffer_size, m_file_size - m_chars_read);
-
-    if(chars_to_read) {
-      TileDBUtils::read_file(m_filename, m_chars_read, m_buffer, chars_to_read);
-       m_chars_read += chars_to_read;
-    }
-
-    m_str_buffer.insert(m_str_buffer.end(), m_buffer, m_buffer + chars_to_read);
-  }
-
-  return false;
-}
-
 SamReader::SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : OmicsFileReader(filename, schema, file_idx) {
   m_fp = hts_open(filename.c_str(),"r"); //open bam file
   m_hdr = sam_hdr_read(m_fp); //read header
@@ -208,9 +301,9 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
       qseq[i] = seq_nt16_str[bam_seqi(q,i)]; //gets nucleotide id and converts them into IUPAC id.
     }
 
-    std::string sample = m_filename;
+    std::string sample = get_filename();
 
-    int64_t position = std::stol(chr) * 100000000 + pos; // FIXME use acutal mapping
+    int64_t position = m_schema->genomic_map.flatten(chr, pos);
 
     std::cerr << "\t\t\t\tREMOVE rname len " << std::strlen(chr) << std::endl;
     std::cerr << "\t\t\t\tREMOVE cigar len " << n_cigar << std::endl;
@@ -455,8 +548,9 @@ void ReadCountLoader::create_schema() {
 // FIXME 
 OmicsLoader::OmicsLoader(
                          const std::string& file_list,
+                         const std::string& mapping_file,
                          bool position_major
-                        ): m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(position_major)) {}
+                        ): m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
 
 void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
   create_schema();

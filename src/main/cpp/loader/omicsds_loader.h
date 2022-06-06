@@ -16,6 +16,8 @@
 #include <limits>
 #include <cassert>
 #include <htslib/sam.h>
+#include <numeric>
+#include <algorithm>
 #include "tiledb.h"
 #include "tiledb_utils.h"
 #include "tiledb_storage.h"
@@ -31,6 +33,30 @@ do {                                                       \
 } while (false)
 
 void read_sam_file(std::string filename);
+
+std::vector<std::string> split(std::string str, std::string sep);
+
+// for reading local/cloud files using TileDBUtils api
+struct FileReaderUtility {
+  FileReaderUtility(const std::string& filename): filename(filename) {
+    buffer = new char[buffer_size];
+    file_size = TileDBUtils::file_size(filename);
+    //      m_file_size = 0;
+  }
+  ~FileReaderUtility() {
+    delete[] buffer;
+  }
+
+  std::string filename;
+  ssize_t file_size = 0;
+  ssize_t chars_read = 0;
+  const int buffer_size = 512;
+  char* buffer;
+  std::string str_buffer;
+
+  // returns true if line was read
+  bool generalized_getline(std::string& retval);
+};
 
 struct OmicsFieldInfo {
   enum OmicsFieldType { omics_char, omics_uint8_t, omics_int8_t,
@@ -111,12 +137,34 @@ struct OmicsFieldData {
   }
 };
 
+struct contig {
+  std::string name;
+  uint64_t length;
+  uint64_t starting_index;
+
+  contig(const std::string& name, uint64_t length, uint64_t starting_index): name(name), length(length), starting_index(starting_index) {}
+};
+
+// datastructure that keeps contigs sorted by name and position
+class GenomicMap {
+public:
+  GenomicMap(const std::string& mapping_file);
+  uint64_t flatten(std::string contig_name, uint64_t offset);
+  std::pair<std::string, uint64_t> unflatten(uint64_t position);
+
+private:
+  FileReaderUtility m_mapping_reader;
+  std::vector<contig> contigs;
+  std::vector<size_t> idxs_name;
+  std::vector<size_t> idxs_position;
+};
+
 struct OmicsSchema {
   enum OmicsStorageOrder { POSITION_MAJOR, SAMPLE_MAJOR };
   OmicsStorageOrder order;
 
-  OmicsSchema(OmicsStorageOrder order = POSITION_MAJOR): order(order) {}
-  OmicsSchema(bool position_major = true) {
+  OmicsSchema(const std::string& mapping_file, OmicsStorageOrder order = POSITION_MAJOR): genomic_map(mapping_file), order(order) {}
+  OmicsSchema(const std::string& mapping_file, bool position_major = true): genomic_map(mapping_file) {
     order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
   }
   ~OmicsSchema() {
@@ -140,6 +188,7 @@ struct OmicsSchema {
     return retval;
   }
   std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order
+  GenomicMap genomic_map;
 };
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
@@ -299,19 +348,11 @@ std::string container_to_string(const T& c) {
 
 class OmicsFileReader {
   public:
-    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : /*m_file(filename),*/ m_filename(filename), m_schema(schema), m_file_idx(file_idx) {
-      m_buffer = new char[m_buffer_size];
-      //m_file_size = TileDBUtils::file_size(filename);
-      m_file_size = 0;
-      // FIXME get file size
-      std::cout << "REMOVE FIXME get file size" << std::endl;
-    }
-    ~OmicsFileReader() {
-      delete[] m_buffer;
+    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : /*m_file(filename),*/ m_reader_util(filename), m_schema(schema), m_file_idx(file_idx) {
     }
 
     const std::string& get_filename() {
-      return m_filename;
+      return m_reader_util.filename;
     }
 
     //OmicsMultiCell next_cell_info();
@@ -320,14 +361,7 @@ class OmicsFileReader {
   protected:
     std::shared_ptr<OmicsSchema> m_schema;
     int m_file_idx;
-    std::string m_filename;
-    ssize_t m_file_size = 0;
-    ssize_t m_chars_read = 0;
-    bool generalized_getline(std::string& retval);
-
-    const int m_buffer_size = 512;
-    char* m_buffer;
-    std::string m_str_buffer;
+    FileReaderUtility m_reader_util;
 };
 
 class SamReader : public OmicsFileReader {
@@ -342,12 +376,24 @@ class SamReader : public OmicsFileReader {
     bam1_t* m_align; // alignment
 };
 
+class BedReader : public OmicsFileReader {
+  public:
+    BedReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx, std::string sample_name) : OmicsFileReader(filename, schema, file_idx), m_sample_name(sample_name), m_file(filename) {
+      std::string str;
+      std::getline(m_file, str);
+    }
+  protected:
+    std::ifstream m_file;
+    std::string m_sample_name;
+};
+
 // intervals are represented as start and end cells, but have no special query
 // support as intervals cannot always be prevented from overlapping
 class OmicsLoader {
   public:
     OmicsLoader(
       const std::string& file_list,
+      const std::string& mapping_file,
       bool position_major
     );
     ~OmicsLoader() {
@@ -403,9 +449,9 @@ class ReadCountLoader : public OmicsLoader {
   public:
     ReadCountLoader(
       const std::string& file_list,
+      const std::string& mapping_file,
       bool position_major
-    ) : OmicsLoader(file_list, position_major) {
-      initialize();
+    ) : OmicsLoader(file_list, mapping_file, position_major) {
     }
     virtual void create_schema() override;
 };

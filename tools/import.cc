@@ -1,13 +1,50 @@
 #include <iostream>
+#include <getopt.h>
 #include "omicsds_loader.h"
+
+enum ArgsEnum {
+  ARGS_IDX_MAPPER
+};
+
+void print_usage() {
+  std::cout << "Usage: omicsds_import [options]\n"
+            << "where options include:\n"
+            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m File containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n";
+}
 
 int main(int argc, char* argv[]) {
   //read_sam_file("/nfs/home/andrei/benchmarking_requirements/toy.sam");
 
+  static struct option long_options[] = {
+    {"mapping-file",1,0,'m'}
+  };
+
+  std::string mapping_file = "";
+
+  int c;
+  while ((c=getopt_long(argc, argv, "m:", long_options, NULL)) >= 0) {
+    switch (c) {
+      case 'm':
+        mapping_file = std::string(optarg);
+        break;
+      default:
+        std::cerr << "Unknown command line argument " << char(c) << "\n";
+        print_usage();
+        return -1;
+    }
+  }
+
+  if(mapping_file == "") {
+    std::cerr << "Mapping file required\n";
+    print_usage();
+    return -1;
+  }
+
   std::cout << "Hello there" << std::endl;
 
   {
-    ReadCountLoader l("/nfs/home/andrei/benchmarking_requirements/sam_list", true);
+    ReadCountLoader l("/nfs/home/andrei/benchmarking_requirements/sam_list", mapping_file, true);
+    l.initialize();
     std::cout << "After ctor in main" << std::endl;
     l.import();
   }
