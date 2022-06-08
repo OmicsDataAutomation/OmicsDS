@@ -47,6 +47,7 @@ int main(int argc, char* argv[]) {
     l.initialize();
     std::cout << "After ctor in main" << std::endl;
     l.import();
+    l.serialize_schema("/nfs/home/andrei/benchmarking_requirements/schema");
   }
 
   // FIXME remove

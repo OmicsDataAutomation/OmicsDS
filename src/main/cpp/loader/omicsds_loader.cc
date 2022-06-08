@@ -208,6 +208,31 @@ bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r) {
   return true;
 }
 
+void GenomicMap::serialize(std::string path) {
+  for(auto& c : contigs) {
+    c.serialize(path);
+  }
+}
+
+void OmicsSchema::serialize(std::string path) {
+  auto write = [&](std::string str) {
+    return FileReaderUtility::write_file(path, str);
+  };
+
+  write("v1\n"); // version
+  std::string order_str = (order == POSITION_MAJOR)? "POSITION_MAJOR\n" : "SAMPLE_MAJOR\n";
+  write(order_str); // order
+  // attributes
+  for(auto& a : attributes) {
+    write(a.first); // attribute name
+    write("\t");
+    write(a.second.to_string()); // attribute_type as string
+    write("\n");
+  }
+
+  genomic_map.serialize(path);
+}
+
 std::vector<uint8_t> OmicsMultiCell::as_cell() {
   return {};
   //construct cell

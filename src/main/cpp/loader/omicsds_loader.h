@@ -56,6 +56,9 @@ struct FileReaderUtility {
 
   // returns true if line was read
   bool generalized_getline(std::string& retval);
+  static int write_file(std::string filename, std::string str, const bool overwrite=false) {
+    return TileDBUtils::write_file(filename, str.c_str(), str.size(), overwrite);
+  }
 };
 
 struct OmicsFieldInfo {
@@ -87,6 +90,21 @@ struct OmicsFieldInfo {
       case omics_int64_t:  return TILEDB_INT64;
     }
     return TILEDB_CHAR;
+  }
+
+  std::string to_string() const {
+    switch(type) {
+      case omics_char:     return "omics_char";
+      case omics_uint8_t:  return "omics_uint8_t";
+      case omics_int8_t:   return "omics_int8_t";
+      case omics_uint16_t: return "omics_uint16_t";
+      case omics_int16_t:  return "omics_int16_t";
+      case omics_uint32_t: return "omics_uint32_t";
+      case omics_int32_t:  return "omics_int32_t";
+      case omics_uint64_t: return "omics_uint64_t";
+      case omics_int64_t:  return "omics_int64_t";
+    }
+    return "unknown_type";
   }
 
   int element_size() {
@@ -143,6 +161,10 @@ struct contig {
   uint64_t starting_index;
 
   contig(const std::string& name, uint64_t length, uint64_t starting_index): name(name), length(length), starting_index(starting_index) {}
+  void serialize(std::string path) {
+    std::string str = name + "\t" + std::to_string(length) + "\t" + std::to_string(starting_index) + "\n";
+    FileReaderUtility::write_file(path, str);
+  }
 };
 
 // datastructure that keeps contigs sorted by name and position
@@ -151,6 +173,7 @@ public:
   GenomicMap(const std::string& mapping_file);
   uint64_t flatten(std::string contig_name, uint64_t offset);
   std::pair<std::string, uint64_t> unflatten(uint64_t position);
+  void serialize(std::string path);
 
 private:
   FileReaderUtility m_mapping_reader;
@@ -189,6 +212,7 @@ struct OmicsSchema {
   }
   std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order
   GenomicMap genomic_map;
+  void serialize(std::string path);
 };
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
@@ -403,6 +427,7 @@ class OmicsLoader {
     virtual void create_schema() = 0;
     void initialize(); // cannot be part of constructor because it invokes create_schema, which is virtual
     //virtual void query() = 0; // query
+    void serialize_schema(std::string path) { m_schema->serialize(path); }
   protected:
     int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
     int tiledb_open_array(const std::string& path, bool write = true);
