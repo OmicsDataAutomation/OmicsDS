@@ -10,8 +10,11 @@ void print_usage() {
   std::cout << "Usage: omicsds_import [options]\n"
             << "where options include:\n"
             << "\t \e[1m--workspace\e[0m, \e[1m-w\e[0m Path to workspace\n"
-            << "\t \e[1m--array\e[0m, \e[1m-a\e[0m Name of array (should not include path to workspace) \n"
-            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n";
+            << "\t \e[1m--array\e[0m, \e[1m-a\e[0m Name of array (should not include path to workspace)\n"
+            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n"
+            << "\t \e[1m--file-list\e[0m, \e[1m-f\e[0m Path to file containing paths to files to be ingested\n"
+            << "\t \e[1m--read-counts\e[0m, \e[1m-r\e[0m Command to ingest read count related data (file list should contain BAM files) \n"
+            << "\t\t Optional";
 }
 
 int main(int argc, char* argv[]) {
@@ -23,15 +26,19 @@ int main(int argc, char* argv[]) {
   static struct option long_options[] = {
     {"workspace",1,0,'w'},
     {"array",1,0,'a'},
-    {"mapping-file",1,0,'m'}
+    {"mapping-file",1,0,'m'},
+    {"file-list",1,0,'f'},
+    {"read-counts",0,0,'r'}
   };
 
   std::string workspace = "";
   std::string array = "";
   std::string mapping_file = "";
+  std::string file_list = "";
+  bool read_counts = false;
 
   int c;
-  while ((c=getopt_long(argc, argv, "w:a:m:", long_options, NULL)) >= 0) {
+  while ((c=getopt_long(argc, argv, "w:a:m:f:r", long_options, NULL)) >= 0) {
     switch (c) {
       case 'w':
         workspace = std::string(optarg);
@@ -41,6 +48,12 @@ int main(int argc, char* argv[]) {
         break;
       case 'm':
         mapping_file = std::string(optarg);
+        break;
+      case 'f':
+        file_list = std::string(optarg);
+        break;
+      case 'r':
+        read_counts = true;
         break;
       default:
         std::cerr << "Unknown command line argument " << char(c) << "\n";
@@ -64,11 +77,16 @@ int main(int argc, char* argv[]) {
     print_usage();
     return -1;
   }
+  if(file_list == "") {
+    std::cerr << "File list required\n";
+    print_usage();
+    return -1;
+  }
 
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
-  {
-    ReadCountLoader l(workspace, array, "/nfs/home/andrei/benchmarking_requirements/sam_list", mapping_file, true);
+  if(read_counts) {
+    ReadCountLoader l(workspace, array, file_list, mapping_file, true);
     l.initialize();
     std::cout << "After ctor in main" << std::endl;
     l.import();
