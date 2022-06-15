@@ -9,21 +9,36 @@ enum ArgsEnum {
 void print_usage() {
   std::cout << "Usage: omicsds_import [options]\n"
             << "where options include:\n"
-            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m File containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n";
+            << "\t \e[1m--workspace\e[0m, \e[1m-w\e[0m Path to workspace\n"
+            << "\t \e[1m--array\e[0m, \e[1m-a\e[0m Name of array (should not include path to workspace) \n"
+            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n";
 }
 
 int main(int argc, char* argv[]) {
+  char* cwd1 = getcwd(0, 0);
+  std::cerr << "**************************** first cwd is " << cwd1 << std::endl;
+
   //read_sam_file("/nfs/home/andrei/benchmarking_requirements/toy.sam");
 
   static struct option long_options[] = {
+    {"workspace",1,0,'w'},
+    {"array",1,0,'a'},
     {"mapping-file",1,0,'m'}
   };
 
+  std::string workspace = "";
+  std::string array = "";
   std::string mapping_file = "";
 
   int c;
-  while ((c=getopt_long(argc, argv, "m:", long_options, NULL)) >= 0) {
+  while ((c=getopt_long(argc, argv, "w:a:m:", long_options, NULL)) >= 0) {
     switch (c) {
+      case 'w':
+        workspace = std::string(optarg);
+        break;
+      case 'a':
+        array = std::string(optarg);
+        break;
       case 'm':
         mapping_file = std::string(optarg);
         break;
@@ -34,23 +49,33 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  if(workspace == "") {
+    std::cerr << "Workspace required\n";
+    print_usage();
+    return -1;
+  }
+  if(array == "") {
+    std::cerr << "Array required\n";
+    print_usage();
+    return -1;
+  }
   if(mapping_file == "") {
     std::cerr << "Mapping file required\n";
     print_usage();
     return -1;
   }
 
-  std::cout << "Hello there" << std::endl;
+  std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
   {
-    ReadCountLoader l("/nfs/home/andrei/benchmarking_requirements/sam_list", mapping_file, true);
+    ReadCountLoader l(workspace, array, "/nfs/home/andrei/benchmarking_requirements/sam_list", mapping_file, true);
     l.initialize();
     std::cout << "After ctor in main" << std::endl;
     l.import();
     l.serialize_schema("/nfs/home/andrei/benchmarking_requirements/schema");
   }
 
-  // FIXME remove
+  /*// FIXME remove
   std::cerr << "FIXME remove end of main reading" << std::endl;
 
   // ================================== ARRAY READ ======================
@@ -62,11 +87,16 @@ int main(int argc, char* argv[]) {
 
   const char array_name[] = "/nfs/home/andrei/OmicsDS/build.debug/workspace/sparse_arrays/array";
 
+  char buffer[1024];
+
+  char* cwd = getcwd(0, 0);
+  std::cerr << "**************************** cwd is " << cwd << std::endl;
+
   // Initialize array
   CHECK_RC(tiledb_array_init(
            tiledb_ctx,                           // Context
            &tiledb_array,                        // Array object
-           array_name,                           // Array name
+           &array_name[0],                       // Array name
            TILEDB_ARRAY_READ,                    // Mode
            NULL,                                 // Whole domain
            NULL,                                 // All attributes
@@ -113,11 +143,13 @@ int main(int argc, char* argv[]) {
     printf("\t %4.*s\n", int(var_size), &buffer_qname_var[buffer_qname[i]]);
   }
 
+  std::cerr << "After reading in import" << std::endl;
+
   // Finalize the array
   CHECK_RC(tiledb_array_finalize(tiledb_array));
 
   // Finalize context
   CHECK_RC(tiledb_ctx_finalize(tiledb_ctx));
 
-  return 0;
+  return 0;*/
 }

@@ -37,13 +37,13 @@ void read_sam_file(std::string filename);
 std::vector<std::string> split(std::string str, std::string sep);
 
 // for reading local/cloud files using TileDBUtils api
-struct FileReaderUtility {
-  FileReaderUtility(const std::string& filename): filename(filename) {
+struct FileUtility {
+  FileUtility(const std::string& filename): filename(filename) {
     buffer = new char[buffer_size];
     file_size = TileDBUtils::file_size(filename);
     //      m_file_size = 0;
   }
-  ~FileReaderUtility() {
+  ~FileUtility() {
     delete[] buffer;
   }
 
@@ -74,6 +74,27 @@ struct OmicsFieldInfo {
       length = _length;
     }
   }
+  
+  OmicsFieldInfo(std::string type, int _length) {
+    if(_length < 0) {
+      length = TILEDB_VAR_NUM;
+    }
+    else {
+      length = _length;
+    }
+    if(type == "omics_char") { type = omics_char; return; }
+    if(type == "omics_uint8_t") { type = omics_uint8_t; return; }
+    if(type == "omics_int8_t") { type = omics_int8_t; return; }
+    if(type == "omics_uint16_t") { type = omics_uint16_t; return; }
+    if(type == "omics_int16_t") { type = omics_int16_t; return; }
+    if(type == "omics_uint32_t") { type = omics_uint32_t; return; }
+    if(type == "omics_int32_t") { type = omics_int32_t; return; }
+    if(type == "omics_uint64_t") { type = omics_uint64_t; return; }
+    if(type == "omics_int64_t") { type = omics_int64_t; return; }
+    type = omics_uint8_t;
+    return;
+  }
+
   OmicsFieldType type;
   int length; // number of elements, -1 encodes variable
 
@@ -92,7 +113,7 @@ struct OmicsFieldInfo {
     return TILEDB_CHAR;
   }
 
-  std::string to_string() const {
+  std::string type_to_string() const {
     switch(type) {
       case omics_char:     return "omics_char";
       case omics_uint8_t:  return "omics_uint8_t";
@@ -105,6 +126,13 @@ struct OmicsFieldInfo {
       case omics_int64_t:  return "omics_int64_t";
     }
     return "unknown_type";
+  }
+
+  std::string length_to_string() const {
+    if(length == TILEDB_VAR_NUM) {
+      return "variable";
+    }
+    return std::to_string(length);
   }
 
   int element_size() {
@@ -163,7 +191,7 @@ struct contig {
   contig(const std::string& name, uint64_t length, uint64_t starting_index): name(name), length(length), starting_index(starting_index) {}
   void serialize(std::string path) {
     std::string str = name + "\t" + std::to_string(length) + "\t" + std::to_string(starting_index) + "\n";
-    FileReaderUtility::write_file(path, str);
+    FileUtility::write_file(path, str);
   }
 };
 
@@ -171,12 +199,13 @@ struct contig {
 class GenomicMap {
 public:
   GenomicMap(const std::string& mapping_file);
+  GenomicMap(std::shared_ptr<FileUtility> mapping_reader);
   uint64_t flatten(std::string contig_name, uint64_t offset);
   std::pair<std::string, uint64_t> unflatten(uint64_t position);
   void serialize(std::string path);
 
 private:
-  FileReaderUtility m_mapping_reader;
+  std::shared_ptr<FileUtility> m_mapping_reader;
   std::vector<contig> contigs;
   std::vector<size_t> idxs_name;
   std::vector<size_t> idxs_position;
@@ -186,10 +215,12 @@ struct OmicsSchema {
   enum OmicsStorageOrder { POSITION_MAJOR, SAMPLE_MAJOR };
   OmicsStorageOrder order;
 
+  OmicsSchema() = default;
   OmicsSchema(const std::string& mapping_file, OmicsStorageOrder order = POSITION_MAJOR): genomic_map(mapping_file), order(order) {}
   OmicsSchema(const std::string& mapping_file, bool position_major = true): genomic_map(mapping_file) {
     order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
   }
+  void create_from_file(const std::string& path);
   ~OmicsSchema() {
     std::cerr << "REMOVE schema destructor called" << std::endl;
   }
@@ -372,11 +403,11 @@ std::string container_to_string(const T& c) {
 
 class OmicsFileReader {
   public:
-    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : /*m_file(filename),*/ m_reader_util(filename), m_schema(schema), m_file_idx(file_idx) {
+    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : /*m_file(filename),*/ m_reader_util(std::make_shared<FileUtility>(filename)), m_schema(schema), m_file_idx(file_idx) {
     }
 
     const std::string& get_filename() {
-      return m_reader_util.filename;
+      return m_reader_util->filename;
     }
 
     //OmicsMultiCell next_cell_info();
@@ -385,7 +416,7 @@ class OmicsFileReader {
   protected:
     std::shared_ptr<OmicsSchema> m_schema;
     int m_file_idx;
-    FileReaderUtility m_reader_util;
+    std::shared_ptr<FileUtility> m_reader_util;
 };
 
 class SamReader : public OmicsFileReader {
@@ -416,6 +447,8 @@ class BedReader : public OmicsFileReader {
 class OmicsLoader {
   public:
     OmicsLoader(
+      const std::string& workspace,
+      const std::string& array,
       const std::string& file_list,
       const std::string& mapping_file,
       bool position_major
@@ -429,8 +462,10 @@ class OmicsLoader {
     //virtual void query() = 0; // query
     void serialize_schema(std::string path) { m_schema->serialize(path); }
   protected:
+    std::string m_workspace;
+    std::string m_array;
     int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
-    int tiledb_open_array(const std::string& path, bool write = true);
+    int tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write = true);
     int tiledb_close_array();
     int tiledb_write_buffers();
     bool m_superimpose; // whether to contain data for multiple logical cells within one cell
@@ -473,10 +508,12 @@ class OmicsLoader {
 class ReadCountLoader : public OmicsLoader {
   public:
     ReadCountLoader(
+      const std::string& workspace,
+      const std::string& array,
       const std::string& file_list,
       const std::string& mapping_file,
       bool position_major
-    ) : OmicsLoader(file_list, mapping_file, position_major) {
+    ) : OmicsLoader(workspace, array, file_list, mapping_file, position_major) {
     }
     virtual void create_schema() override;
 };

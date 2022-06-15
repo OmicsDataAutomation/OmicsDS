@@ -19,7 +19,7 @@ std::vector<std::string> split(std::string str, std::string sep) {
   return retval;
 }
 
-bool FileReaderUtility::generalized_getline(std::string& retval) {
+bool FileUtility::generalized_getline(std::string& retval) {
   retval = "";
 
   while(chars_read < file_size || str_buffer.size()) {
@@ -121,15 +121,18 @@ void read_sam_file(std::string filename) {
   sam_close(fp_in);
 }
 
-GenomicMap::GenomicMap(const std::string& mapping_file): m_mapping_reader(mapping_file) {
+GenomicMap::GenomicMap(const std::string& mapping_file): GenomicMap(std::make_shared<FileUtility>(mapping_file)) { }
+
+GenomicMap::GenomicMap(std::shared_ptr<FileUtility> mapping_reader): m_mapping_reader(mapping_reader) {
   std::string str;
   int line_num = -1;
-  while(m_mapping_reader.generalized_getline(str)) {
+  while(m_mapping_reader->generalized_getline(str)) {
     line_num++;
 
     auto toks = split(str, "\t");
     if(toks.size() < 3) {
-      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader.filename << " does not contain enough fields (at least 3), make sure the file is tab separated" << std::endl;
+      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader->filename << " does not contain enough fields (at least 3), make sure the file is tab separated" << std::endl;
+      std::cerr << "Note: mapping file may be subset of serialized schema" << std::endl;
       continue;
     }
 
@@ -143,7 +146,8 @@ GenomicMap::GenomicMap(const std::string& mapping_file): m_mapping_reader(mappin
       starting_index = std::stol(toks[2]);
     }
     catch(...) {
-      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader.filename << " could not be parsed (2nd or 3rd field was not a valid uint64_t)" << std::endl;
+      std::cerr << "Warning: line " << line_num << " of mapping file " << m_mapping_reader->filename << " could not be parsed (2nd or 3rd field was not a valid uint64_t)" << std::endl;
+      std::cerr << "Note: mapping file may be subset of serialized schema" << std::endl;
       continue;
     }
 
@@ -192,7 +196,7 @@ uint64_t GenomicMap::flatten(std::string contig_name, uint64_t offset) {
     }
   }
   else {
-    std::cerr << "Error, contig " << contig_name << " not found in mapping file " << m_mapping_reader.filename << std::endl;
+    std::cerr << "Error, contig " << contig_name << " not found in mapping file " << m_mapping_reader->filename << std::endl;
     exit(1);
   }
 }
@@ -215,22 +219,102 @@ void GenomicMap::serialize(std::string path) {
 }
 
 void OmicsSchema::serialize(std::string path) {
+  if(TileDBUtils::is_file(path)) {
+    TileDBUtils::delete_file(path);
+  }
+
   auto write = [&](std::string str) {
-    return FileReaderUtility::write_file(path, str);
+    return FileUtility::write_file(path, str);
   };
 
   write("v1\n"); // version
   std::string order_str = (order == POSITION_MAJOR)? "POSITION_MAJOR\n" : "SAMPLE_MAJOR\n";
   write(order_str); // order
+  std::string num_attributes_str = std::to_string(attributes.size()) + "\tattributes\n";
+  write(num_attributes_str);
   // attributes
   for(auto& a : attributes) {
     write(a.first); // attribute name
     write("\t");
-    write(a.second.to_string()); // attribute_type as string
+    write(a.second.type_to_string()); // attribute type as string
+    write("\t");
+    write(a.second.length_to_string()); // attribute length as string
     write("\n");
   }
 
   genomic_map.serialize(path);
+}
+
+void OmicsSchema::create_from_file(const std::string& filename) {
+  if(!TileDBUtils::is_file(filename)) {
+    std::cerr << "Error: cannot deserialize OmicsSchema, " << filename << " does not exist" << std::endl;
+    return;
+  }
+
+  std::shared_ptr<FileUtility> reader = std::make_shared<FileUtility>(filename);
+  std::string str;
+
+  // version
+  if(!reader->generalized_getline(str)) {
+    std::cerr << "Error: cannot deserialize OmicsSchema, " << filename << " is empty" << std::endl;
+    return;
+  }
+  if(str != "v1") {
+    std::cerr << "Note: while deserializing OmicsSchema encountered version " << str << ", only v1 is supported" << std::endl;
+  }
+
+  // order
+  if(!reader->generalized_getline(str)) {
+    std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading order" << std::endl;
+    return;
+  }
+  if(str == "POSITION_MAJOR") {
+    order = POSITION_MAJOR;
+  }
+  else if(str == "SAMPLE_MAJOR") {
+    order = SAMPLE_MAJOR;
+  }
+  else {
+    std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading order" << std::endl;
+    return;
+  }
+
+  if(!reader->generalized_getline(str)) {
+    std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading number of attributes" << std::endl;
+    return;
+  }
+  int num_attributes = -1;
+  try {
+    num_attributes = std::stoi(split(str, "\t")[0]);
+    if(num_attributes < 0) { throw std::runtime_error("number of attributes is negative"); }
+  }
+  catch (...) {
+    std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading number of attributes" << std::endl;
+    return;
+  }
+
+  for(int i = 0; i < num_attributes; i++) {
+    if(!reader->generalized_getline(str)) {
+      std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", fewer attributes than reported (" << i << " of " << num_attributes << ")" << std::endl;
+      return;
+    }
+    auto tokens = split(str, "\t");
+    if(tokens.size() < 3) {
+      std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading attribute " << i << std::endl;
+      return;
+    }
+    int length;
+    try {
+      length = std::stoi(tokens[2]);
+    }
+    catch(...) {
+      length = -1;
+    }
+
+    attributes.emplace(tokens[0], OmicsFieldInfo(tokens[1], length));
+  }
+
+  genomic_map = GenomicMap(reader);
 }
 
 std::vector<uint8_t> OmicsMultiCell::as_cell() {
@@ -371,12 +455,7 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
   // Create a workspace
   CHECK_RC(tiledb_workspace_create(tiledb_ctx, workspace.c_str()));
 
-  std::string group = workspace + "/sparse_arrays";
-
-  // Create two groups in the worskpace
-  CHECK_RC(tiledb_group_create(tiledb_ctx, group.c_str()));
-
-  std::string full_name = group + "/" + array_name;
+  std::string full_name = workspace + "/" + array_name;
 
   // Prepare parameters for array schema
   std::vector<const char*> attributes_vec;
@@ -473,8 +552,10 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
   return 0;
 }
 
-int OmicsLoader::tiledb_open_array(const std::string& path, bool write) {
+int OmicsLoader::tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write) {
   CHECK_RC(tiledb_ctx_init(&m_tiledb_ctx, NULL));
+
+  std::string path = workspace + "/" + array_name;
 
   // Initialize array
   CHECK_RC(tiledb_array_init(
@@ -572,10 +653,12 @@ void ReadCountLoader::create_schema() {
 // FIXME add parallelism of some kind
 // FIXME 
 OmicsLoader::OmicsLoader(
+                         const std::string& workspace,
+                         const std::string& array,
                          const std::string& file_list,
                          const std::string& mapping_file,
                          bool position_major
-                        ): m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
+                        ): m_workspace(workspace), m_array(array), m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
 
 void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
   create_schema();
@@ -585,8 +668,11 @@ void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere
   coords_buffer.clear();
 
   // FIXME don't hardcode
-  tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema);
-  tiledb_open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/sparse_arrays/array");
+  //tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema);
+  //tiledb_open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/array");
+  
+  tiledb_create_array(m_workspace, m_array, *m_schema);
+  tiledb_open_array(m_workspace, m_array);
 
   std::ifstream f(m_file_list); // initialize OmicsFileReaders from list of filenames
   std::string s;
