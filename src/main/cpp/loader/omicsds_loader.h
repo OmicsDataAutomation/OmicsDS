@@ -150,6 +150,10 @@ struct OmicsFieldInfo {
     return 1;
   }
 
+  bool is_variable() {
+    return length == TILEDB_VAR_NUM;
+  }
+
   bool operator==(const OmicsFieldInfo& o) {
     return type == o.type;
   }
@@ -198,6 +202,7 @@ struct contig {
 // datastructure that keeps contigs sorted by name and position
 class GenomicMap {
 public:
+  GenomicMap() {}
   GenomicMap(const std::string& mapping_file);
   GenomicMap(std::shared_ptr<FileUtility> mapping_reader);
   uint64_t flatten(std::string contig_name, uint64_t offset);
@@ -215,12 +220,12 @@ struct OmicsSchema {
   enum OmicsStorageOrder { POSITION_MAJOR, SAMPLE_MAJOR };
   OmicsStorageOrder order;
 
-  OmicsSchema() = default;
+  OmicsSchema() {}
   OmicsSchema(const std::string& mapping_file, OmicsStorageOrder order = POSITION_MAJOR): genomic_map(mapping_file), order(order) {}
   OmicsSchema(const std::string& mapping_file, bool position_major = true): genomic_map(mapping_file) {
     order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
   }
-  void create_from_file(const std::string& path);
+  bool create_from_file(const std::string& path);
   ~OmicsSchema() {
     std::cerr << "REMOVE schema destructor called" << std::endl;
   }
@@ -442,9 +447,31 @@ class BedReader : public OmicsFileReader {
     std::string m_sample_name;
 };
 
-// intervals are represented as start and end cells, but have no special query
-// support as intervals cannot always be prevented from overlapping
-class OmicsLoader {
+class OmicsModule {
+  public:
+    OmicsModule(const std::string& workspace, const std::string& array) : m_workspace(workspace), m_array(array) {}
+    OmicsModule(const std::string& workspace, const std::string& array, const std::string& mapping_file, bool position_major) : m_workspace(workspace), m_array(array), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
+    void serialize_schema(std::string path) { m_schema->serialize(path); }
+    void serialize_schema() { serialize_schema(m_workspace + "/" + m_array + "/omics_schema"); }
+    void deserialize_schema(std::string path) { m_schema.reset(); m_schema = std::make_shared<OmicsSchema>(); m_schema->create_from_file(path); }
+    void deserialize_schema() { deserialize_schema(m_workspace + "/" + m_array + "/omics_schema"); };
+
+  protected:
+    std::string m_workspace;
+    std::string m_array;
+    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
+    int tiledb_create_array() { return tiledb_create_array(m_workspace, m_array, *m_schema); }
+    int tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write = true);
+    int tiledb_open_array(bool write = true) { return tiledb_open_array(m_workspace, m_array, write); }
+    int tiledb_close_array();
+    TileDB_CTX* m_tiledb_ctx;
+    TileDB_Array* m_tiledb_array;
+    std::shared_ptr<OmicsSchema> m_schema;
+    int m_array_descriptor;
+};
+
+// intervals are represented as start and end cells
+class OmicsLoader : public OmicsModule {
   public:
     OmicsLoader(
       const std::string& workspace,
@@ -459,35 +486,20 @@ class OmicsLoader {
     void import();// import data from callsets
     virtual void create_schema() = 0;
     void initialize(); // cannot be part of constructor because it invokes create_schema, which is virtual
-    //virtual void query() = 0; // query
-    void serialize_schema(std::string path) { m_schema->serialize(path); }
   protected:
-    std::string m_workspace;
-    std::string m_array;
-    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
-    int tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write = true);
-    int tiledb_close_array();
     int tiledb_write_buffers();
-    bool m_superimpose; // whether to contain data for multiple logical cells within one cell
-    
-    TileDB_CTX* m_tiledb_ctx;
-    TileDB_Array* m_tiledb_array;
     std::vector<std::vector<size_t>> offset_buffers;
     std::vector<std::vector<char>> var_buffers; // entries for constant length attributes will be empty
     std::vector<size_t> coords_buffer;
-    size_t buffer_size = 1024;
+    size_t buffer_size = 10240;
 
     void buffer_cell(const OmicsMultiCell& cell, int level = 0);
 
-    std::shared_ptr<OmicsSchema> m_schema;
     std::string m_file_list;
-    //std::vector<std::string> m_filenames; // list of input file names
     std::vector<std::shared_ptr<OmicsFileReader>> m_files;
     typedef std::shared_ptr<OmicsFileReader> omics_fptr;
-    //std::priority_queue<omics_fptr, std::vector<omics_fptr>, std::function<bool(omics_fptr, omics_fptr)>> m_pq;
     std::priority_queue<OmicsMultiCell, std::vector<OmicsMultiCell>, std::function<bool(OmicsMultiCell, OmicsMultiCell)>> m_pq;
     int m_idx;
-    int m_array_descriptor;
     static bool comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
       auto l = _l.coords;
       auto r = _r.coords;
@@ -516,4 +528,19 @@ class ReadCountLoader : public OmicsLoader {
     ) : OmicsLoader(workspace, array, file_list, mapping_file, position_major) {
     }
     virtual void create_schema() override;
+};
+
+class OmicsReader : public OmicsModule {
+  public:
+    OmicsReader(const std::string& workspace, const std::string& array) : OmicsModule(workspace, array) {
+      deserialize_schema();
+      tiledb_open_array(false);
+    }
+  
+    void query();
+
+  protected:
+    std::vector<std::vector<uint8_t>> m_buffers_vector;
+    std::pair<std::vector<void*>, std::vector<size_t>> prepare_buffers();
+    size_t m_buffer_size = 1024;
 };

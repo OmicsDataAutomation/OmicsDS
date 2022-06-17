@@ -1,6 +1,9 @@
 #include <iostream>
 #include <getopt.h>
 #include "omicsds_loader.h"
+// FIXME REMOVE
+#include <chrono>
+#include <thread>
 
 enum ArgsEnum {
   ARGS_IDX_MAPPER
@@ -86,11 +89,19 @@ int main(int argc, char* argv[]) {
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
   if(read_counts) {
-    ReadCountLoader l(workspace, array, file_list, mapping_file, true);
-    l.initialize();
-    std::cout << "After ctor in main" << std::endl;
-    l.import();
-    l.serialize_schema("/nfs/home/andrei/benchmarking_requirements/schema");
+    {
+      ReadCountLoader l(workspace, array, file_list, mapping_file, true);
+      l.initialize();
+      std::cout << "After ctor in main" << std::endl;
+      l.import();
+      l.serialize_schema();
+
+      // FIXME REMOVE
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    
+    OmicsReader r(workspace, array);
+    r.query();
   }
 
   /*// FIXME remove

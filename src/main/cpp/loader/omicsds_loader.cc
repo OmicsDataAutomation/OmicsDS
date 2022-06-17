@@ -245,10 +245,10 @@ void OmicsSchema::serialize(std::string path) {
   genomic_map.serialize(path);
 }
 
-void OmicsSchema::create_from_file(const std::string& filename) {
+bool OmicsSchema::create_from_file(const std::string& filename) {
   if(!TileDBUtils::is_file(filename)) {
     std::cerr << "Error: cannot deserialize OmicsSchema, " << filename << " does not exist" << std::endl;
-    return;
+    return false;
   }
 
   std::shared_ptr<FileUtility> reader = std::make_shared<FileUtility>(filename);
@@ -257,7 +257,7 @@ void OmicsSchema::create_from_file(const std::string& filename) {
   // version
   if(!reader->generalized_getline(str)) {
     std::cerr << "Error: cannot deserialize OmicsSchema, " << filename << " is empty" << std::endl;
-    return;
+    return false;
   }
   if(str != "v1") {
     std::cerr << "Note: while deserializing OmicsSchema encountered version " << str << ", only v1 is supported" << std::endl;
@@ -266,7 +266,7 @@ void OmicsSchema::create_from_file(const std::string& filename) {
   // order
   if(!reader->generalized_getline(str)) {
     std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading order" << std::endl;
-    return;
+    return false;
   }
   if(str == "POSITION_MAJOR") {
     order = POSITION_MAJOR;
@@ -276,12 +276,12 @@ void OmicsSchema::create_from_file(const std::string& filename) {
   }
   else {
     std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading order" << std::endl;
-    return;
+    return false;
   }
 
   if(!reader->generalized_getline(str)) {
     std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading number of attributes" << std::endl;
-    return;
+    return false;
   }
   int num_attributes = -1;
   try {
@@ -290,18 +290,19 @@ void OmicsSchema::create_from_file(const std::string& filename) {
   }
   catch (...) {
     std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading number of attributes" << std::endl;
-    return;
+    return false;
   }
 
+  attributes.clear();
   for(int i = 0; i < num_attributes; i++) {
     if(!reader->generalized_getline(str)) {
       std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", fewer attributes than reported (" << i << " of " << num_attributes << ")" << std::endl;
-      return;
+      return false;
     }
     auto tokens = split(str, "\t");
     if(tokens.size() < 3) {
       std::cerr << "Error: cannot deserialize OmicsSchema from " << filename << ", issue reading attribute " << i << std::endl;
-      return;
+      return false;
     }
     int length;
     try {
@@ -315,6 +316,7 @@ void OmicsSchema::create_from_file(const std::string& filename) {
   }
 
   genomic_map = GenomicMap(reader);
+  return true;
 }
 
 std::vector<uint8_t> OmicsMultiCell::as_cell() {
@@ -447,7 +449,7 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
   }
 }
 
-int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema) {
+int OmicsModule::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema) {
   // initialize with the default configuration parameters
   TileDB_CTX* tiledb_ctx;
   CHECK_RC(tiledb_ctx_init(&tiledb_ctx, NULL));
@@ -552,7 +554,7 @@ int OmicsLoader::tiledb_create_array(const std::string& workspace, const std::st
   return 0;
 }
 
-int OmicsLoader::tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write) {
+int OmicsModule::tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write) {
   CHECK_RC(tiledb_ctx_init(&m_tiledb_ctx, NULL));
 
   std::string path = workspace + "/" + array_name;
@@ -570,7 +572,7 @@ int OmicsLoader::tiledb_open_array(const std::string& workspace, const std::stri
   return 0;
 }
 
-int OmicsLoader::tiledb_close_array() {
+int OmicsModule::tiledb_close_array() {
   // Finalize array
   if(m_tiledb_array) CHECK_RC(tiledb_array_finalize(m_tiledb_array));
   m_tiledb_array = 0;
@@ -658,7 +660,7 @@ OmicsLoader::OmicsLoader(
                          const std::string& file_list,
                          const std::string& mapping_file,
                          bool position_major
-                        ): m_workspace(workspace), m_array(array), m_file_list(file_list), m_pq(comparitor), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
+                        ): OmicsModule(workspace, array, mapping_file, position_major), m_file_list(file_list), m_pq(comparitor) {}
 
 void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
   create_schema();
@@ -781,4 +783,93 @@ void OmicsLoader::import() {
   //if(valid && current_cell.coords[0] >= 0 && current_cell.coords[1] >= 0) { // see if last cell needs to be written to disk
   //  std::cout << current_cell.to_string() << std::endl << std::endl; // FIXME write to disk
   //}
+}
+
+std::pair<std::vector<void*>, std::vector<size_t>> OmicsReader::prepare_buffers() {
+  m_buffers_vector.clear();
+  std::vector<void*> pointers;
+  std::vector<size_t> sizes;
+
+  for(auto&[_, inf] : m_schema->attributes) {
+    for(int i = 0; i < 1 + (inf.is_variable()); i++) { // 1 buffer if fixed length, 2 if variable
+      m_buffers_vector.emplace_back(m_buffer_size);
+      pointers.push_back(m_buffers_vector.back().data());
+      sizes.push_back(m_buffers_vector.back().size());
+    }
+  }
+  // coords
+  m_buffers_vector.emplace_back(m_buffer_size);
+  pointers.push_back(m_buffers_vector.back().data());
+  sizes.push_back(m_buffers_vector.back().size());
+  
+  return { pointers, sizes };
+}
+
+void OmicsReader::query() {
+  auto[pointers_vec, sizes_vec] = prepare_buffers();
+  void** pointers = pointers_vec.data();
+  size_t* sizes = sizes_vec.data();
+
+  std::string array_name = m_workspace + "/" + m_array;  
+
+  // int64_t subarray[] = { 3, 4, 2, 4 };
+
+  TileDB_ArrayIterator* tiledb_array_it;
+  tiledb_array_iterator_init(
+      m_tiledb_ctx,                                  // Context
+      &tiledb_array_it,                              // Array iterator
+      array_name.c_str(),                            // Array name
+      TILEDB_ARRAY_READ,                             // Mode
+      0,                                      // Constrain in subarray
+      0,                                    // Subset on attributes
+      m_schema->attributes.size(),                   // Number of attributes
+      pointers,                                       // Buffers used internally
+      sizes);                                 // Buffer sizes
+
+ 
+  const int* a1_v;
+  size_t a1_size;
+  while(!tiledb_array_iterator_end(tiledb_array_it)) {
+    int i = -1;
+    std::cout << std::endl << std::endl << "New cell" << std::endl;
+    for(auto& a : m_schema->attributes) {
+      ++i;
+      // Get value
+      tiledb_array_iterator_get_value(
+          tiledb_array_it,     // Array iterator
+          i,                   // Attribute id
+          (const void**) &a1_v,// Value
+          &a1_size);           // Value size (useful in variable-sized attributes)
+
+      // Print value (if not a deletion)
+      if(*a1_v != TILEDB_EMPTY_INT32) { 
+        std::cout << "attribute " << a.first << std::endl;
+        printf("%3d\n", *a1_v);
+        std::cout << a.first << " size " << a1_size << std::endl;
+      }
+    }
+
+
+    ++i;
+    // FIXME fix i
+    i = m_schema->attributes.size();
+    uint64_t* coords;
+    tiledb_array_iterator_get_value(
+        tiledb_array_it,     // Array iterator
+        i,                   // Attribute id
+        (const void**)&coords,// Value
+        &a1_size);           // Value size (useful in variable-sized attributes)
+
+    // Print value (if not a deletion)
+    if(*a1_v != TILEDB_EMPTY_INT32) {
+      std::cout << "coords " << coords[0] << ", " << coords[1] << ", " << coords[2] << std::endl;
+      std::cout << "coords size " << a1_size << std::endl;
+    }
+
+    // Advance iterator
+    if(tiledb_array_iterator_next(tiledb_array_it)) {
+      exit(1);
+    }
+  }
+
 }
