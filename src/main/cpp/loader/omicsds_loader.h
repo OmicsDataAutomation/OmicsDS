@@ -537,7 +537,7 @@ class OmicsReader : public OmicsModule {
       tiledb_open_array(false);
     }
   
-    void query();
+    void query(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()});
 
   protected:
     std::vector<std::vector<uint8_t>> m_buffers_vector;

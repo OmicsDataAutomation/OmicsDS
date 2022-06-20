@@ -805,14 +805,17 @@ std::pair<std::vector<void*>, std::vector<size_t>> OmicsReader::prepare_buffers(
   return { pointers, sizes };
 }
 
-void OmicsReader::query() {
+void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range) {
   auto[pointers_vec, sizes_vec] = prepare_buffers();
   void** pointers = pointers_vec.data();
   size_t* sizes = sizes_vec.data();
 
   std::string array_name = m_workspace + "/" + m_array;  
 
-  // int64_t subarray[] = { 3, 4, 2, 4 };
+  auto row_range = m_schema->position_major() ? position_range : sample_range;
+  auto col_range = m_schema->position_major() ? sample_range : position_range;
+  //int64_t subarray[] = { 0, std::numeric_limits<int64_t>::max(), 0, 0, 0, std::numeric_limits<int64_t>::max() };
+  int64_t subarray[] = { row_range[0], row_range[1], col_range[0], col_range[1], 0, std::numeric_limits<int64_t>::max() };
 
   TileDB_ArrayIterator* tiledb_array_it;
   tiledb_array_iterator_init(
@@ -820,14 +823,14 @@ void OmicsReader::query() {
       &tiledb_array_it,                              // Array iterator
       array_name.c_str(),                            // Array name
       TILEDB_ARRAY_READ,                             // Mode
-      0,                                      // Constrain in subarray
+      subarray,                                      // Constrain in subarray
       0,                                    // Subset on attributes
       m_schema->attributes.size(),                   // Number of attributes
       pointers,                                       // Buffers used internally
       sizes);                                 // Buffer sizes
 
  
-  const int* a1_v;
+  const char* a1_v;
   size_t a1_size;
   while(!tiledb_array_iterator_end(tiledb_array_it)) {
     int i = -1;
@@ -851,8 +854,6 @@ void OmicsReader::query() {
 
 
     ++i;
-    // FIXME fix i
-    i = m_schema->attributes.size();
     uint64_t* coords;
     tiledb_array_iterator_get_value(
         tiledb_array_it,     // Array iterator
@@ -861,7 +862,7 @@ void OmicsReader::query() {
         &a1_size);           // Value size (useful in variable-sized attributes)
 
     // Print value (if not a deletion)
-    if(*a1_v != TILEDB_EMPTY_INT32) {
+    if(*coords != TILEDB_EMPTY_INT32) {
       std::cout << "coords " << coords[0] << ", " << coords[1] << ", " << coords[2] << std::endl;
       std::cout << "coords size " << a1_size << std::endl;
     }
