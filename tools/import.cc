@@ -101,7 +101,8 @@ int main(int argc, char* argv[]) {
     }
     
     OmicsReader r(workspace, array);
-    r.query({1, 1});
+    //r.query({0, 1}, {59, 61});
+    r.query();
   }
 
   /*// FIXME remove

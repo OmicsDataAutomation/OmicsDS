@@ -18,6 +18,7 @@
 #include <htslib/sam.h>
 #include <numeric>
 #include <algorithm>
+#include <utility>
 #include "tiledb.h"
 #include "tiledb_utils.h"
 #include "tiledb_storage.h"
@@ -176,7 +177,7 @@ struct OmicsFieldData {
   }
 
   template<class T>
-  void push_pointer_back(T* elem_ptr, int n) {
+  void push_pointer_back(const T* elem_ptr, int n) {
     size_t size = data.size();
     data.resize(data.size() + sizeof(T)*n);
     T* ptr = reinterpret_cast<T*>(data.data() + size);
@@ -232,18 +233,14 @@ struct OmicsSchema {
   bool position_major() const {
     return order == POSITION_MAJOR;
   }
+  // swaps between standard and schema order
   // standard order is SAMPLE, POSITION, will swap if position major
-  std::array<int64_t, 2> standard_to_schema_order(const std::array<int64_t, 2>& coords) {
-    std::array<int64_t, 2> retval;
+  template<class T, size_t U>
+  std::array<T, U> swap_order(const std::array<T, U>& coords) {
+    std::array<T, U> retval = coords;
     if(position_major()) {
-      retval[0] = coords[1];
-      retval[1] = coords[0];
+      std::swap(retval[0], retval[1]);
     }
-    else {
-      retval[0] = coords[0];
-      retval[1] = coords[1];
-    }
-    // return position_major() ? std::array<int64_t, 2>(coords[1], coords[0]) : coords;
     return retval;
   }
   std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order
@@ -491,6 +488,7 @@ class OmicsLoader : public OmicsModule {
     std::vector<std::vector<size_t>> offset_buffers;
     std::vector<std::vector<char>> var_buffers; // entries for constant length attributes will be empty
     std::vector<size_t> coords_buffer;
+    std::vector<size_t> attribute_offsets; // persists between writes
     size_t buffer_size = 10240;
 
     void buffer_cell(const OmicsMultiCell& cell, int level = 0);
@@ -540,7 +538,9 @@ class OmicsReader : public OmicsModule {
     void query(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()});
 
   protected:
+    // coords are in standard order SAMPLE, POSITION, COLLISION INDEX
+    virtual void process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data);
     std::vector<std::vector<uint8_t>> m_buffers_vector;
     std::pair<std::vector<void*>, std::vector<size_t>> prepare_buffers();
-    size_t m_buffer_size = 1024;
+    size_t m_buffer_size = 10240;
 };

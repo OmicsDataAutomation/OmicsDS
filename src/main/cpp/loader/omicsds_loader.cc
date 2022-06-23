@@ -168,7 +168,8 @@ GenomicMap::GenomicMap(std::shared_ptr<FileUtility> mapping_reader): m_mapping_r
   }
   std::cout << std::endl << std::endl;
 
-  std::cout << "name orders" << std::endl;
+  // FIXME REMOVE
+  /*std::cout << "name orders" << std::endl;
   for(auto& i : idxs_name) {
     std::cout << i << std::endl;
   }
@@ -179,6 +180,7 @@ GenomicMap::GenomicMap(std::shared_ptr<FileUtility> mapping_reader): m_mapping_r
     std::cout << i << std::endl;
   }
   std::cout << std::endl << std::endl;
+  */
 }
 
 uint64_t GenomicMap::flatten(std::string contig_name, uint64_t offset) {
@@ -433,6 +435,9 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
     cell.subcells[0].add_field_ptr("SEQ", qseq.data(), (int)qseq.size());
     cell.subcells[0].add_field_ptr("QUAL", qual, std::strlen(qual));
   
+    // FIXME REMOVE
+    cell.subcells[0].add_field_ptr("SAMPLE_NAME", (char*)sample.c_str(), (int)sample.length());
+
 
     OmicsMultiCell end_cell = cell;
     end_cell.subcells[0].file_idx = -1;
@@ -591,7 +596,7 @@ int OmicsLoader::tiledb_write_buffers() {
   int i = 0;
   for(auto it = m_schema->attributes.begin(); it != m_schema->attributes.end(); it++, i++) {
     buffers_vec.push_back(offset_buffers[i].data());
-    buffer_sizes_vec.push_back(offset_buffers[i].size());
+    buffer_sizes_vec.push_back(offset_buffers[i].size() * sizeof(size_t));
 
     if(it->second.length == TILEDB_VAR_NUM) {
       buffers_vec.push_back(var_buffers[i].data());
@@ -619,7 +624,9 @@ void OmicsLoader::buffer_cell(const OmicsMultiCell& cell, int level) {
       int length = aiter->second.length;
       int size = aiter->second.element_size();
       if(length == TILEDB_VAR_NUM) { // variable length
-        offset_buffers[i].push_back(var_buffers[i].size());
+        //offset_buffers[i].push_back(var_buffers[i].size());
+        offset_buffers[i].push_back(attribute_offsets[i]);
+        attribute_offsets[i] += data.size();
         for(auto& c : data) {
           var_buffers[i].push_back(c);
         }
@@ -668,6 +675,7 @@ void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere
   offset_buffers = std::vector<std::vector<size_t>>(m_schema->attributes.size());
   var_buffers = std::vector<std::vector<char>>(m_schema->attributes.size());
   coords_buffer.clear();
+  attribute_offsets = std::vector<size_t>(m_schema->attributes.size(), 0);
 
   // FIXME don't hardcode
   //tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema);
@@ -702,7 +710,7 @@ void OmicsLoader::push_from_all_files() {
     std::cout << "REMOVE pushing cells from file " << f->get_filename() << std::endl;
     for(auto& c : cells) {
       if(OmicsMultiCell::is_invalid_cell(c)) continue;
-      c.coords = m_schema->standard_to_schema_order(c.coords);
+      c.coords = m_schema->swap_order(c.coords); // to schema order
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
     }
@@ -717,7 +725,7 @@ void OmicsLoader::push_from_idxs(const std::set<int>& idxs) {
     std::cout << "REMOVE pushing cells from file " << idx << std::endl;
     for(auto& c : cells) {
       if(OmicsMultiCell::is_invalid_cell(c)) continue;
-      c.coords = m_schema->standard_to_schema_order(c.coords);
+      c.coords = m_schema->swap_order(c.coords); // to schema order
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
     }
@@ -830,19 +838,24 @@ void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t,
       sizes);                                 // Buffer sizes
 
  
-  const char* a1_v;
-  size_t a1_size;
+  std::vector<OmicsFieldData> data(m_schema->attributes.size());
+  std::array<uint64_t, 3> coords;
+
+  const uint8_t* a1_v;
+  size_t a1_size = 0;
   while(!tiledb_array_iterator_end(tiledb_array_it)) {
     int i = -1;
     std::cout << std::endl << std::endl << "New cell" << std::endl;
     for(auto& a : m_schema->attributes) {
       ++i;
       // Get value
-      tiledb_array_iterator_get_value(
+      int rc = tiledb_array_iterator_get_value(
           tiledb_array_it,     // Array iterator
           i,                   // Attribute id
           (const void**) &a1_v,// Value
           &a1_size);           // Value size (useful in variable-sized attributes)
+
+      data[i].data = std::vector<uint8_t>(a1_v, a1_v + a1_size);
 
       // Print value (if not a deletion)
       if(*a1_v != TILEDB_EMPTY_INT32) { 
@@ -854,23 +867,36 @@ void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t,
 
 
     ++i;
-    uint64_t* coords;
+    uint64_t* coords_ptr;
     tiledb_array_iterator_get_value(
         tiledb_array_it,     // Array iterator
         i,                   // Attribute id
-        (const void**)&coords,// Value
+        (const void**)&coords_ptr,// Value
         &a1_size);           // Value size (useful in variable-sized attributes)
 
+    coords = { coords_ptr[0], coords_ptr[1], coords_ptr[2] };
+    coords = m_schema->swap_order(coords);
+
     // Print value (if not a deletion)
-    if(*coords != TILEDB_EMPTY_INT32) {
-      std::cout << "coords " << coords[0] << ", " << coords[1] << ", " << coords[2] << std::endl;
+    if(*coords_ptr != TILEDB_EMPTY_INT32) {
+      std::cout << "coords " << coords_ptr[0] << ", " << coords_ptr[1] << ", " << coords_ptr[2] << std::endl;
       std::cout << "coords size " << a1_size << std::endl;
     }
+
+    process(coords, data);
 
     // Advance iterator
     if(tiledb_array_iterator_next(tiledb_array_it)) {
       exit(1);
     }
   }
+}
 
+void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data) {
+  std::cout << "process " << coords[0] << ", " << coords[1] << ", " << coords[2] << std::endl;
+  std::cout << data.size() << " fields" << std::endl;
+  for(auto& a : data) {
+    std::cout << "\t" << a.size() << " bytes" << std::endl;
+  }
+  std::cout << std::endl;
 }
