@@ -186,6 +186,19 @@ struct OmicsFieldData {
       ptr[i] = elem_ptr[i];
     }
   }
+  
+  template<class T>
+  const T* get_ptr() const {
+    return (T*)data.data();
+  }
+  template<class T>
+  T get(int idx = 0) const { // FIXME check bounds?
+    return ((T*)data.data())[idx];
+  }
+  template<class T>
+  int typed_size() const {
+    return data.size() / sizeof(T);
+  }
 };
 
 struct contig {
@@ -246,6 +259,7 @@ struct OmicsSchema {
   std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order
   GenomicMap genomic_map;
   void serialize(std::string path);
+  int index_of_attribute(const std::string& name);
 };
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
@@ -535,7 +549,8 @@ class OmicsReader : public OmicsModule {
       tiledb_open_array(false);
     }
   
-    void query(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()});
+    typedef std::function<void (const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data)> process_function;
+    void query(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, process_function proc = 0);
 
   protected:
     // coords are in standard order SAMPLE, POSITION, COLLISION INDEX
@@ -543,4 +558,13 @@ class OmicsReader : public OmicsModule {
     std::vector<std::vector<uint8_t>> m_buffers_vector;
     std::pair<std::vector<void*>, std::vector<size_t>> prepare_buffers();
     size_t m_buffer_size = 10240;
+};
+
+class SamExporter : public OmicsReader { // for exporting data as SAM files
+  public:
+    SamExporter(const std::string& workspace, const std::string& array) : OmicsReader(workspace, array) {}
+    void export_sams(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, const std::string& ouput_prefix = "sam_output");
+
+  protected:
+    void sam_interface(std::map<int64_t, std::shared_ptr<std::ofstream>>& files, const std::string& output_prefix, const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data);
 };

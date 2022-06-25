@@ -100,9 +100,16 @@ int main(int argc, char* argv[]) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
     
-    OmicsReader r(workspace, array);
-    //r.query({0, 1}, {59, 61});
-    r.query();
+    {
+      OmicsReader r(workspace, array);
+      //r.query({0, 1}, {59, 61});
+      r.query();
+    }
+
+    {
+      SamExporter s(workspace, array);
+      s.export_sams();
+    }
   }
 
   /*// FIXME remove

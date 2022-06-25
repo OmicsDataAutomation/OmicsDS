@@ -321,6 +321,16 @@ bool OmicsSchema::create_from_file(const std::string& filename) {
   return true;
 }
 
+// FIXME could potentially index map instead of doing this, only an issue if very many attributes
+int OmicsSchema::index_of_attribute(const std::string& name) {
+  auto it = attributes.find(name);  
+  if(it == attributes.end()) {
+    return -1;
+  }
+
+  return std::distance(attributes.begin(), it);
+}
+
 std::vector<uint8_t> OmicsMultiCell::as_cell() {
   return {};
   //construct cell
@@ -813,7 +823,7 @@ std::pair<std::vector<void*>, std::vector<size_t>> OmicsReader::prepare_buffers(
   return { pointers, sizes };
 }
 
-void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range) {
+void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range, process_function proc) {
   auto[pointers_vec, sizes_vec] = prepare_buffers();
   void** pointers = pointers_vec.data();
   size_t* sizes = sizes_vec.data();
@@ -883,13 +893,21 @@ void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t,
       std::cout << "coords size " << a1_size << std::endl;
     }
 
-    process(coords, data);
+    if(proc) {
+      proc(coords, data); // argument function
+    }
+    else {
+      process(coords, data); // virtual member function
+    }
 
     // Advance iterator
     if(tiledb_array_iterator_next(tiledb_array_it)) {
       exit(1);
     }
   }
+
+  // Finalize array
+  tiledb_array_iterator_finalize(tiledb_array_it);
 }
 
 void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data) {
@@ -899,4 +917,46 @@ void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vect
     std::cout << "\t" << a.size() << " bytes" << std::endl;
   }
   std::cout << std::endl;
+}
+
+void SamExporter::export_sams(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range, const std::string& output_prefix) {
+  // open files
+  std::map<int64_t, std::shared_ptr<std::ofstream>> files;
+
+  process_function bound = std::bind(&SamExporter::sam_interface, this, files, output_prefix, std::placeholders::_1, std::placeholders::_2);
+  query(sample_range, position_range, bound);
+}
+
+void SamExporter::sam_interface(std::map<int64_t, std::shared_ptr<std::ofstream>>& files, const std::string& output_prefix, const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data) {
+  int64_t row = coords[0];
+
+  std::shared_ptr<std::ofstream> file;
+  if(!files.count(row)) {
+    files[row] = std::make_shared<std::ofstream>(output_prefix + std::to_string(row) + ".sam");
+  }
+  file = files[row];
+
+  auto get_field = [&](const std::string& name) -> const OmicsFieldData& { // TODO check bounds?
+    return data[m_schema->index_of_attribute(name)];
+  };
+
+  // QNAME
+  auto& qname_data = get_field("QNAME");
+  std::string qname(qname_data.get_ptr<char>(), qname_data.size());
+  *file << qname << "\t";
+
+  // FLAG
+  auto& flag_data = get_field("FLAG");
+  *file << flag_data.get<uint16_t>() << "\t";
+
+  // RNAME
+  auto& rname_data = get_field("RNAME");
+  std::string rname(rname_data.get_ptr<char>(), rname_data.size());
+  *file << rname << "\t";
+
+  // POS
+  auto& pos_data = get_field("POS");
+  *file << pos_data.get<int32_t>() << "\t";
+
+  *file << std::endl;
 }
