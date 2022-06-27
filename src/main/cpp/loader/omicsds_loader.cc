@@ -594,7 +594,7 @@ int OmicsLoader::tiledb_write_buffers() {
   int i = 0;
   for(auto it = m_schema->attributes.begin(); it != m_schema->attributes.end(); it++, i++) {
     buffers_vec.push_back(offset_buffers[i].data());
-    buffer_sizes_vec.push_back(offset_buffers[i].size() * sizeof(size_t));
+    buffer_sizes_vec.push_back(offset_buffers[i].size());
 
     if(it->second.length == TILEDB_VAR_NUM) {
       buffers_vec.push_back(var_buffers[i].data());
@@ -621,7 +621,7 @@ void OmicsLoader::buffer_cell(const OmicsCell& cell, int level) {
     int length = aiter->second.length;
     int size = aiter->second.element_size();
     if(length == TILEDB_VAR_NUM) { // variable length
-      offset_buffers[i].push_back(attribute_offsets[i]);
+      OmicsFieldData::push_back<size_t>(offset_buffers[i], attribute_offsets[i]);
       attribute_offsets[i] += data.size();
       for(auto& c : data) {
         var_buffers[i].push_back(c);
@@ -667,8 +667,8 @@ OmicsLoader::OmicsLoader(
 void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
   create_schema();
 
-  offset_buffers = std::vector<std::vector<size_t>>(m_schema->attributes.size());
-  var_buffers = std::vector<std::vector<char>>(m_schema->attributes.size());
+  offset_buffers = std::vector<std::vector<uint8_t>>(m_schema->attributes.size());
+  var_buffers = std::vector<std::vector<uint8_t>>(m_schema->attributes.size());
   coords_buffer.clear();
   attribute_offsets = std::vector<size_t>(m_schema->attributes.size(), 0);
 
@@ -939,7 +939,29 @@ void SamExporter::sam_interface(std::map<int64_t, std::shared_ptr<std::ofstream>
   // CIGAR
   auto& cigar_data = get_field("CIGAR");
   std::string cigar_string = SamReader::cigar_to_string(cigar_data.get_ptr<uint32_t>(), cigar_data.typed_size<uint32_t>());
-  *file << cigar_string;
+  *file << cigar_string << "\t";
+
+  // RNEXT
+  auto& rnext_data = get_field("RNEXT"); // FIXME should be a string but htslib turns it into a int32_t
+  *file << rnext_data.get<int32_t>() << "\t";
+
+  // PNEXT
+  auto& pnext_data = get_field("PNEXT");
+  *file << pnext_data.get<int32_t>() << "\t";
+
+  // TLEN
+  auto& tlen_data = get_field("TLEN");
+  *file << tlen_data.get<int32_t>() << "\t";
+
+  // SEQ
+  auto& seq_data = get_field("SEQ");
+  std::string seq(seq_data.get_ptr<char>(), seq_data.size());
+  *file << seq << "\t";
+
+  // QUAL
+  auto& qual_data = get_field("QUAL");
+  std::string qual(qual_data.get_ptr<char>(), qual_data.size());
+  *file << qual;
 
   *file << std::endl;
 }

@@ -169,11 +169,16 @@ struct OmicsFieldData {
     return data[idx];
   }
   template<class T>
-  void push_back(const T& elem) {
-    auto size = data.size();
-    data.resize(data.size() + sizeof(elem));
-    T* ptr = reinterpret_cast<T*>(data.data() + size);
+  static void push_back(std::vector<uint8_t>& v, const T& elem) {
+    auto size = v.size();
+    v.resize(v.size() + sizeof(elem));
+    T* ptr = reinterpret_cast<T*>(v.data() + size);
     *ptr = elem;
+  }
+
+  template<class T>
+  void push_back(const T& elem) {
+    push_back(data, elem);
   }
 
   template<class T>
@@ -529,8 +534,8 @@ class OmicsLoader : public OmicsModule {
     void initialize(); // cannot be part of constructor because it invokes create_schema, which is virtual
   protected:
     int tiledb_write_buffers();
-    std::vector<std::vector<size_t>> offset_buffers;
-    std::vector<std::vector<char>> var_buffers; // entries for constant length attributes will be empty
+    std::vector<std::vector<uint8_t>> offset_buffers;
+    std::vector<std::vector<uint8_t>> var_buffers; // entries for constant length attributes will be empty
     std::vector<size_t> coords_buffer;
     std::vector<size_t> attribute_offsets; // persists between writes
     size_t buffer_size = 10240;
