@@ -264,14 +264,17 @@ struct OmicsSchema {
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
 struct OmicsCell {
+  std::array<int64_t, 2> coords;
   std::vector<OmicsFieldData> fields; // must be in schema order
   std::shared_ptr<OmicsSchema> schema;
   int file_idx = -1;
 
-  OmicsCell(std::shared_ptr<OmicsSchema> schema, int file_idx) : schema(schema), file_idx(file_idx), fields(std::vector<OmicsFieldData>(schema->attributes.size())) {}
-  OmicsCell(OmicsCell&& o) : schema(o.schema), fields(std::move(o.fields)), file_idx(o.file_idx) {}
-  OmicsCell(const OmicsCell& o) : schema(o.schema), fields(o.fields), file_idx(o.file_idx) {}
+  OmicsCell() {}
+  OmicsCell(std::array<int64_t, 2> coords, std::shared_ptr<OmicsSchema> schema, int file_idx) : coords(coords), schema(schema), file_idx(file_idx), fields(std::vector<OmicsFieldData>(schema->attributes.size())) {}
+  OmicsCell(OmicsCell&& o) : coords(o.coords), schema(o.schema), fields(std::move(o.fields)), file_idx(o.file_idx) {}
+  OmicsCell(const OmicsCell& o) : coords(o.coords), schema(o.schema), fields(o.fields), file_idx(o.file_idx) {}
   OmicsCell& operator=(const OmicsCell& o) {
+    coords = o.coords;
     schema = o.schema;
     fields = o.fields;
     file_idx = o.file_idx;
@@ -301,9 +304,36 @@ struct OmicsCell {
     fields[idx].push_pointer_back(elem_ptr, n);
     return true;
   }
+
+  bool validate() {
+    return fields.size() == schema->attributes.size();
+  }
+
+  static OmicsCell create_invalid_cell();
+
+  static bool is_invalid_cell(const OmicsCell& cell);
+
+  std::string to_string() {
+    std::stringstream ss;
+    ss << "beginning of cell {" << coords[0] << ", " << coords[1] << "}" << std::endl;
+    auto fiter = fields.begin();
+    auto aiter = schema->attributes.begin();
+    for(; fiter != fields.end() && aiter != schema->attributes.end(); fiter++, aiter++) {
+      ss << "\t\t" << aiter->first << std::endl << "\t\t\t\t";
+      for(auto& e : fiter->data) {
+        ss << (int)e << "=" << (char)e << " ";
+      }
+      ss << std::endl;
+    }
+    return ss.str();
+  }
+
+  std::string coords_to_string() {
+    return "{" + std::to_string(coords[0]) + ", " + std::to_string(coords[1]) + "}";
+  }
 };
 
-struct OmicsMultiCell {
+/*struct OmicsMultiCell {
   std::vector<uint8_t> as_cell();
 
   std::shared_ptr<OmicsSchema> schema;  
@@ -404,7 +434,7 @@ struct OmicsMultiCell {
     }
     return rv;
   }
-};
+};*/
 
 template<class T>
 std::string container_to_string(const T& c) {
@@ -426,8 +456,7 @@ class OmicsFileReader {
       return m_reader_util->filename;
     }
 
-    //OmicsMultiCell next_cell_info();
-    virtual std::vector<OmicsMultiCell> get_next_cells() = 0; // standard order for coords is SAMPLE, POSITION, will be transformed by loader
+    virtual std::vector<OmicsCell> get_next_cells() = 0; // standard order for coords is SAMPLE, POSITION, will be transformed by loader
 
   protected:
     std::shared_ptr<OmicsSchema> m_schema;
@@ -439,7 +468,8 @@ class SamReader : public OmicsFileReader {
   public:
     SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx);
     ~SamReader();
-    std::vector<OmicsMultiCell> get_next_cells() override;
+    std::vector<OmicsCell> get_next_cells() override;
+    static std::string cigar_to_string(const uint32_t* cigar, size_t n_cigar);
 
   protected:
     samFile* m_fp; // file pointer
@@ -505,14 +535,14 @@ class OmicsLoader : public OmicsModule {
     std::vector<size_t> attribute_offsets; // persists between writes
     size_t buffer_size = 10240;
 
-    void buffer_cell(const OmicsMultiCell& cell, int level = 0);
+    void buffer_cell(const OmicsCell& cell, int level = 0);
 
     std::string m_file_list;
     std::vector<std::shared_ptr<OmicsFileReader>> m_files;
     typedef std::shared_ptr<OmicsFileReader> omics_fptr;
-    std::priority_queue<OmicsMultiCell, std::vector<OmicsMultiCell>, std::function<bool(OmicsMultiCell, OmicsMultiCell)>> m_pq;
+    std::priority_queue<OmicsCell, std::vector<OmicsCell>, std::function<bool(OmicsCell, OmicsCell)>> m_pq;
     int m_idx;
-    static bool comparitor(OmicsMultiCell _l, OmicsMultiCell _r) {
+    static bool comparitor(OmicsCell _l, OmicsCell _r) {
       auto l = _l.coords;
       auto r = _r.coords;
       return (l[0] > r[0]) || (l[0] == r[0] && l[1] > r[1]);
@@ -521,11 +551,11 @@ class OmicsLoader : public OmicsModule {
     bool less_than(const std::array<int64_t, 2>& l, const std::array<int64_t, 2>& r) {
       return (l[0] < r[0]) || (l[0] == r[0] && l[1] < r[1]);
     }
-    bool less_than(const OmicsMultiCell& l, const OmicsMultiCell& r) {
+    bool less_than(const OmicsCell& l, const OmicsCell& r) {
       return less_than(l.coords, r.coords);
     }
     void push_from_idxs(const std::set<int>& idxs);
-    void push_files_from_cell(const OmicsMultiCell& cell);
+    void push_file_from_cell(const OmicsCell& cell);
     void push_from_all_files();
 };
 

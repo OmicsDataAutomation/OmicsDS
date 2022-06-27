@@ -331,46 +331,13 @@ int OmicsSchema::index_of_attribute(const std::string& name) {
   return std::distance(attributes.begin(), it);
 }
 
-std::vector<uint8_t> OmicsMultiCell::as_cell() {
-  return {};
-  //construct cell
-  /*std::vector<uint8_t> cell(16);
-  *(reinterpret_cast<uint64_t*>(cell.data())) = coords[0]; // write row in cell
-  *(reinterpret_cast<uint64_t*>(cell.data()) + 1) = coords[1]; // write position in cell
-
-  // reserve space for cell size
-  for(int i = 0; i < sizeof(size_t); i++) {
-    cell.push_back(0);
-  }
-
-  // attributes
-  for(int i = 0; i < schema.attribute_num(); i++) {
-    std::string attribute_name = schema.attribute_name(i);
-
-    for(auto& sc : subcells) {
-      
-      cell.push_back();
-
-      if(attribute_name == "NAME") {
-        cell.insert(cell.end(), {0, 0, 0, 0});
-        *(reinterpret_cast<uint32_t*>(cell.data() + cell.size() - 4)) = name.length();
-        for(auto c : name) {
-          cell.push_back(c);
-        }
-      }
-    }
-  }
-  // fill in cell size
-  *(reinterpret_cast<size_t*>(cell.data() + 2*sizeof(int64_t))) = cell.size();*/
-}
-
-OmicsMultiCell OmicsMultiCell::create_invalid_cell() {
-  OmicsMultiCell rv;
+OmicsCell OmicsCell::create_invalid_cell() {
+  OmicsCell rv;
   rv.coords = {-1, -1};
   return rv;
 }
 
-bool OmicsMultiCell::is_invalid_cell(const OmicsMultiCell& cell) {
+bool OmicsCell::is_invalid_cell(const OmicsCell& cell) {
   return cell.coords[0] < 0 || cell.coords[1] < 0;
 }
 
@@ -393,8 +360,28 @@ SamReader::~SamReader() {
   sam_close(m_fp);
 }
 
-std::vector<OmicsMultiCell> SamReader::get_next_cells() {
-  std::vector<OmicsMultiCell> cells;
+std::string SamReader::cigar_to_string(const uint32_t* cigar, size_t n_cigar) {
+  const char cigar_codes[] = {'M', 'I', 'D', 'N', 'S', 'H', 'P', '=', 'X'};
+  const uint32_t op_mask = 0b1111;
+  const uint32_t len_mask = ~op_mask;
+
+  std::stringstream ss;
+
+  for(int i = 0; i < n_cigar; i++) {
+    uint32_t op_idx = cigar[i] & op_mask;
+    if(op_idx >= sizeof(cigar_codes)) {
+      std::cerr << "Error, cigar is badly formed" << std::endl;
+      exit(1); // FIXME handle this better
+    }
+    char op = cigar_codes[op_idx];
+    uint32_t len = (cigar[i] & len_mask) >> 4;
+    ss << len << op;
+  }
+  return ss.str();
+}
+
+std::vector<OmicsCell> SamReader::get_next_cells() {
+  std::vector<OmicsCell> cells;
 
   int rc;
   if(!(rc = sam_read1(m_fp,m_hdr,m_align))){
@@ -431,36 +418,37 @@ std::vector<OmicsMultiCell> SamReader::get_next_cells() {
     std::cerr << "\t\t\t\tREMOVE rname len " << std::strlen(chr) << std::endl;
     std::cerr << "\t\t\t\tREMOVE cigar len " << n_cigar << std::endl;
 
-    OmicsMultiCell cell({ (int64_t)m_file_idx, position}, m_schema);
-    cell.push_empty_cell(m_file_idx);
-    cell.subcells[0].add_field_ptr("QNAME", qname, std::strlen(qname));
-    cell.subcells[0].add_field("FLAG", flag);
-    cell.subcells[0].add_field_ptr("RNAME", chr, std::strlen(chr));
-    cell.subcells[0].add_field("POS", pos);
-    cell.subcells[0].add_field("MAPQ", mapq);
-    cell.subcells[0].add_field_ptr("CIGAR", cigar, n_cigar);
-    cell.subcells[0].add_field("RNEXT", rnext);
-    cell.subcells[0].add_field("PNEXT", pnext);
-    cell.subcells[0].add_field("TLEN", tlen);
-    cell.subcells[0].add_field_ptr("SEQ", qseq.data(), (int)qseq.size());
-    cell.subcells[0].add_field_ptr("QUAL", qual, std::strlen(qual));
+    OmicsCell cell({ (int64_t)m_file_idx, position}, m_schema, m_file_idx);
+    cell.add_field_ptr("QNAME", qname, std::strlen(qname));
+    cell.add_field("FLAG", flag);
+    cell.add_field_ptr("RNAME", chr, std::strlen(chr));
+    cell.add_field("POS", pos);
+    cell.add_field("MAPQ", mapq);
+    cell.add_field_ptr("CIGAR", cigar, n_cigar);
+    cell.add_field("RNEXT", rnext);
+    cell.add_field("PNEXT", pnext);
+    cell.add_field("TLEN", tlen);
+    cell.add_field_ptr("SEQ", qseq.data(), (int)qseq.size());
+    cell.add_field_ptr("QUAL", qual, std::strlen(qual));
   
     // FIXME REMOVE
-    cell.subcells[0].add_field_ptr("SAMPLE_NAME", (char*)sample.c_str(), (int)sample.length());
+    cell.add_field_ptr("SAMPLE_NAME", (char*)sample.c_str(), (int)sample.length());
 
 
-    OmicsMultiCell end_cell = cell;
-    end_cell.subcells[0].file_idx = -1;
-    int end_offset = std::abs(tlen); // FIXME figure out negative template length
+    OmicsCell end_cell = cell;
+    end_cell.file_idx = -1;
+    int end_offset = std::abs(tlen) - 1; // FIXME figure out negative template length
     end_cell.coords[1] += end_offset;
     if(end_offset) {  // if end cell is in same position, only create one cell
+      std::cout << "REMOVE SamReader::get_next_cells return " << cell.coords[1] << ", " << end_cell.coords[1] << std::endl;
       return { cell, end_cell };
     }
+    std::cout << "REMOVE SamReader::get_next_cells return " << cell.coords[1] << std::endl;
     return { cell };
   }
   else {
     std::cout << "REMOVE sam_read1 was " << rc << std::endl;
-    return { OmicsMultiCell::create_invalid_cell() };
+    return { OmicsCell::create_invalid_cell() };
   }
 }
 
@@ -623,35 +611,32 @@ int OmicsLoader::tiledb_write_buffers() {
   return 0;
 }
 
-void OmicsLoader::buffer_cell(const OmicsMultiCell& cell, int level) {
-  for(auto& sc : cell.subcells) {
-    auto fiter = sc.fields.begin();
-    auto aiter = m_schema->attributes.begin();
-    int i = 0;
-    for(; fiter != sc.fields.end() && aiter != m_schema->attributes.end(); fiter++, aiter++, i++) {
-      auto& data = fiter->data;
+void OmicsLoader::buffer_cell(const OmicsCell& cell, int level) {
+  auto fiter = cell.fields.begin();
+  auto aiter = m_schema->attributes.begin();
+  int i = 0;
+  for(; fiter != cell.fields.end() && aiter != m_schema->attributes.end(); fiter++, aiter++, i++) {
+    auto& data = fiter->data;
 
-      int length = aiter->second.length;
-      int size = aiter->second.element_size();
-      if(length == TILEDB_VAR_NUM) { // variable length
-        //offset_buffers[i].push_back(var_buffers[i].size());
-        offset_buffers[i].push_back(attribute_offsets[i]);
-        attribute_offsets[i] += data.size();
-        for(auto& c : data) {
-          var_buffers[i].push_back(c);
-        }
-      }
-      else {
-        assert(data.size() == size * length);
-        for(auto& c : data) {
-          offset_buffers[i].push_back(c);
-        }
+    int length = aiter->second.length;
+    int size = aiter->second.element_size();
+    if(length == TILEDB_VAR_NUM) { // variable length
+      offset_buffers[i].push_back(attribute_offsets[i]);
+      attribute_offsets[i] += data.size();
+      for(auto& c : data) {
+        var_buffers[i].push_back(c);
       }
     }
-    coords_buffer.push_back(cell.coords[0]);
-    coords_buffer.push_back(cell.coords[1]);
-    coords_buffer.push_back(level);
+    else {
+      assert(data.size() == size * length);
+      for(auto& c : data) {
+        offset_buffers[i].push_back(c);
+      }
+    }
   }
+  coords_buffer.push_back(cell.coords[0]);
+  coords_buffer.push_back(cell.coords[1]);
+  coords_buffer.push_back(level);
 }
 
 void ReadCountLoader::create_schema() {
@@ -719,7 +704,7 @@ void OmicsLoader::push_from_all_files() {
     auto cells = f->get_next_cells();
     std::cout << "REMOVE pushing cells from file " << f->get_filename() << std::endl;
     for(auto& c : cells) {
-      if(OmicsMultiCell::is_invalid_cell(c)) continue;
+      if(OmicsCell::is_invalid_cell(c)) continue;
       c.coords = m_schema->swap_order(c.coords); // to schema order
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
@@ -734,7 +719,7 @@ void OmicsLoader::push_from_idxs(const std::set<int>& idxs) {
     auto cells = m_files[idx]->get_next_cells();
     std::cout << "REMOVE pushing cells from file " << idx << std::endl;
     for(auto& c : cells) {
-      if(OmicsMultiCell::is_invalid_cell(c)) continue;
+      if(OmicsCell::is_invalid_cell(c)) continue;
       c.coords = m_schema->swap_order(c.coords); // to schema order
       std::cout << "\tREMOVE " << container_to_string(c.coords) << std::endl;
       m_pq.push(c);
@@ -742,14 +727,12 @@ void OmicsLoader::push_from_idxs(const std::set<int>& idxs) {
   }
 }
 
-void OmicsLoader::push_files_from_cell(const OmicsMultiCell& cell) {
-  push_from_idxs(cell.get_file_idxs());
+void OmicsLoader::push_file_from_cell(const OmicsCell& cell) {
+  push_from_idxs({ cell.file_idx });
 }
 
 void OmicsLoader::import() {
   std::cout << "OmicsLoader::import" << std::endl;
-  //OmicsMultiCell current_cell;
-  //bool valid = false; // whether value of current_cell is meaningfull
   
   std::cout << "REMOVE beginning m_pq.size() is " << m_pq.size() << std::endl;
 
@@ -760,21 +743,11 @@ void OmicsLoader::import() {
     auto cell = m_pq.top();
     std::cout << "\t\t\tREMOVE top coords are " << container_to_string(m_pq.top().coords) << std::endl;
     m_pq.pop();
-    push_files_from_cell(cell); // make sure that all files are still represented in pq
+    push_file_from_cell(cell); // make sure that all files are still represented in pq
 
     if(cell.coords[0] < 0 || cell.coords[1] < 0) { // invalid cell
       continue;
     }
-
-    // read cells until top of pq is later
-    /*while(m_pq.size() && m_pq.top().coords == cell.coords) {
-      std::cout << "\t\t\tREMOVE in while, temp coords are " << container_to_string(m_pq.top().coords) << std::endl;
-      OmicsMultiCell temp(m_pq.top());
-      m_pq.pop();
-      push_files_from_cell(temp); // make sure that all files are still represented in pq
-
-      cell.merge(temp);
-    }*/
 
     if(less_than(m_pq.top(), cell)) {
       std::cerr << "Error, top of priority queue is less than previous cell" << std::endl;
@@ -792,6 +765,7 @@ void OmicsLoader::import() {
     }
 
     // write cell
+    std::cerr << "REMOVE import buffering cell " << std::endl;
     std::cerr << cell.to_string() << std::endl << std::endl; // FIXME write to disk
     buffer_cell(cell, level);
   }
@@ -957,6 +931,15 @@ void SamExporter::sam_interface(std::map<int64_t, std::shared_ptr<std::ofstream>
   // POS
   auto& pos_data = get_field("POS");
   *file << pos_data.get<int32_t>() << "\t";
+
+  // MAPQ
+  auto& mapq_data = get_field("MAPQ");
+  *file << std::to_string(mapq_data.get<uint8_t>()) << "\t";
+
+  // CIGAR
+  auto& cigar_data = get_field("CIGAR");
+  std::string cigar_string = SamReader::cigar_to_string(cigar_data.get_ptr<uint32_t>(), cigar_data.typed_size<uint32_t>());
+  *file << cigar_string;
 
   *file << std::endl;
 }

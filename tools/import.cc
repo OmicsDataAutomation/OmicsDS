@@ -101,12 +101,14 @@ int main(int argc, char* argv[]) {
     }
     
     {
+      std::cout << "===================================== NORMAL QUERY =========================================" << std::endl;
       OmicsReader r(workspace, array);
       //r.query({0, 1}, {59, 61});
       r.query();
     }
 
     {
+      std::cout << "===================================== SAM QUERY =========================================" << std::endl;
       SamExporter s(workspace, array);
       s.export_sams();
     }
