@@ -19,10 +19,13 @@ void print_usage() {
             << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai (only needs first 3 columns: contig name, length, and starting index separated by tabs) \n"
             << "\t \e[1m--file-list\e[0m, \e[1m-f\e[0m Path to file containing paths to files to be ingested (one path per line)\n"
             << "\t \e[1m--sample-map\e[0m, \e[1m-s\e[0m Path to file containing information mapping between samples names and row indices in OmicsDS (each line is a sample name and an integer row number separated by a tab)\n"
+            << "\t \e[1m--sample-major\e[0m, Indicates that data from input files should be stored in sample major order on disk (cells for the same sample stored contiguously). Default behavior is position major\n"
+            << "\t\t Optional\n"
             << "\t \e[1m--read-counts\e[0m, \e[1m-r\e[0m Command to ingest read count related data (file list should contain SAM files) \n"
             << "\t\t Optional\n"
             << "\t \e[1m--transcriptomics\e[0m, \e[1m-t\e[0m Command to transcriptomic data (file list should contain Bed and Matrix files) \n"
             << "\t\t Optional\n"
+            << "\t\t \e[1m--gene-mapping-file\e[0m, Path to gtf/gff/gi v1 file for use with transcriptomics \n"
             << "Query options\n"
             << "\t \e[1m--generic-query\e[0m, \e[1m-g\e[0m Command to perform generic query. WIP. Output is probably not useful.\n"
             << "\t\t Optional\n"
@@ -36,7 +39,7 @@ int main(int argc, char* argv[]) {
 
   //read_sam_file("/nfs/home/andrei/benchmarking_requirements/toy.sam");
 
-  enum options_enum { EXPORT_SAM };
+  enum options_enum { EXPORT_SAM, SAMPLE_MAJOR, GENE_MAPPING_FILE };
 
   static struct option long_options[] = {
     {"workspace",1,0,'w'},
@@ -47,7 +50,9 @@ int main(int argc, char* argv[]) {
     {"read-counts",0,0,'r'},
     {"generic-query", 0, 0, 'g'},
     {"export-sam", 0, 0, EXPORT_SAM},
-    {"transcriptomics", 0, 0, 't'}
+    {"transcriptomics", 0, 0, 't'},
+    {"sample-major", 0, 0, SAMPLE_MAJOR},
+    {"gene-mapping-file", 1, 0, GENE_MAPPING_FILE}
   };
 
   std::string workspace = "";
@@ -58,7 +63,9 @@ int main(int argc, char* argv[]) {
   bool read_counts = false;
   bool generic_query = false;
   bool export_sam = false;
-  bool transcriptomics;
+  bool transcriptomics = false;
+  bool position_major = true;
+  std::string gene_mapping_file = "";
 
   int c;
   while ((c=getopt_long(argc, argv, "w:a:m:f:rs:gt", long_options, NULL)) >= 0) {
@@ -89,6 +96,12 @@ int main(int argc, char* argv[]) {
         break;
       case 't':
         transcriptomics = true;
+        break;
+      case SAMPLE_MAJOR:
+        position_major = false;
+        break;
+      case GENE_MAPPING_FILE:
+        gene_mapping_file = std::string(optarg);
         break;
       default:
         std::cerr << "Unknown command line argument " << char(c) << "\n";
@@ -125,11 +138,19 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  if(transcriptomics) {
+    if(gene_mapping_file == "") {
+      std::cerr << "Gene mapping file required\n";
+      print_usage();
+      return -1;
+    }
+  }
+
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
   if(read_counts) {
     {
-      ReadCountLoader l(workspace, array, file_list, sample_map, mapping_file, true);
+      ReadCountLoader l(workspace, array, file_list, sample_map, mapping_file, position_major);
       l.initialize();
       std::cout << "After ctor in main" << std::endl;
       l.import();
@@ -137,7 +158,7 @@ int main(int argc, char* argv[]) {
   }
 
   if(transcriptomics) {
-    TranscriptomicsLoader l(workspace, array, file_list, sample_map, mapping_file, true);
+    TranscriptomicsLoader l(workspace, array, file_list, sample_map, mapping_file, gene_mapping_file, position_major);
     l.initialize();
     l.import();
   }

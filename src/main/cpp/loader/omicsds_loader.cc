@@ -514,21 +514,21 @@ std::vector<OmicsCell> BedReader::get_next_cells() {
     if(fields.size() < 5) { continue; }
 
     std::string chrom = fields[0], gene = "N/A", name = fields[3];
-    uint64_t start, end;
+    uint64_t start, end, flattened_start, flattened_end;
     float score;
     
     try {
       start = std::stoul(fields[1]);
-      start = m_schema->genomic_map.flatten(chrom, start);
+      flattened_start = m_schema->genomic_map.flatten(chrom, start);
       end = std::stoul(fields[2]);
-      end = m_schema->genomic_map.flatten(chrom, end);
+      flattened_end = m_schema->genomic_map.flatten(chrom, end);
       score = std::stof(fields[4]);
     }
     catch(...) {
       continue;
     }
 
-    OmicsCell cell({ (int64_t)m_row_idx, start }, m_schema, m_file_idx);
+    OmicsCell cell({ (int64_t)m_row_idx, (int64_t)flattened_start }, m_schema, m_file_idx);
     cell.add_field_ptr("CHROM", chrom.c_str(), chrom.length());
     cell.add_field("START", start);
     cell.add_field("END", end);
@@ -539,14 +539,118 @@ std::vector<OmicsCell> BedReader::get_next_cells() {
 
     OmicsCell end_cell = cell;
     end_cell.file_idx = -1;
-    end_cell.coords[1] = end;
+    end_cell.coords[1] = flattened_end;
 
-    if(start == end) {
+    if(flattened_start == flattened_end) {
       return { cell };
     }
     return { cell, end_cell };
   }
   return { };
+}
+
+MatrixReader::MatrixReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, std::shared_ptr<GeneIdMap> gene_id_map, int file_idx): OmicsFileReader(filename, schema, sample_map, file_idx), m_gene_id_map(gene_id_map) {
+  std::string line;
+
+  if(!m_reader_util->generalized_getline(line)) {
+    std::cerr << "Error, file " << filename << " is empty" << std::endl;
+    exit(1);
+  }
+
+  auto toks = split(line, "\t"); // TODO maybe support commas as well
+  if(toks[0] == "GENE") {
+    m_position_major = false;
+  }
+  else if(toks[0] == "SAMPLE") {
+    m_position_major = true;
+  }
+  else {
+    std::cerr << "Error reading file " << filename << std::endl;
+    std::cerr << "Matrix files should be tab separated in format: " << std::endl;
+    std::cerr << "Gene\t[gene1]\t[gene2]" <<  std::endl;
+    std::cerr << "[sample1]\t[score1]\t[score2]" << std::endl;
+    std::cerr << "Or the transpose (keyword SAMPLE instead of GENE, genes across rows)" << std::endl;
+  }
+  if(m_position_major != m_schema->position_major()) {
+    std::cerr << "Error order of matrix file " << filename << " does not match that of schema (must both be position or sample major for now, WIP)" << std::endl;
+    exit(1);
+  }
+  m_columns = std::vector<std::string>(toks.begin() + 1, toks.end());
+  m_row_scores = std::vector<float>(m_columns.size(), 0);
+}
+
+bool MatrixReader::parse_next(std::string& sample, std::string& gene, float& score) {
+  while(m_column_idx >= m_row_scores.size()) {
+    std::string line;
+    if(!m_reader_util->generalized_getline(line)) {
+      return false;
+    }
+
+    auto toks = split(line, "\t");
+    if(toks.size() != m_columns.size() + 1) { // sample/gene id followed by scores
+      continue;
+    }
+
+    m_current_token = toks[0];
+
+    try {
+      for(int i = 0; i < m_columns.size(); i++) {
+        m_row_scores[i] = std::stof(toks[i + 1]);
+      }
+    }
+    catch (...) {
+      continue;
+    }
+    m_column_idx = 0;
+    break;
+  }
+
+  if(m_position_major) {
+    sample = m_columns[m_column_idx];
+    gene = m_current_token;
+  }
+  else {
+    sample = m_current_token;
+    gene = m_columns[m_column_idx];
+  }
+  score = m_row_scores[m_column_idx];
+  m_column_idx++;
+  return true;
+}
+
+std::vector<OmicsCell> MatrixReader::get_next_cells() {
+  std::string sample_name, gene_name; // TODO avoid repeated lookups for row token
+  float score;
+  uint64_t row_idx;
+
+  while(parse_next(sample_name, gene_name, score)) {
+    if(!m_sample_map->count(sample_name) || !m_gene_id_map->count(gene_name)) { continue; }
+    
+    row_idx = (*m_sample_map)[sample_name];
+    GeneIdMap::Gene& gene = (*m_gene_id_map)[gene_name];
+
+    std::string name = "N/A";
+
+    OmicsCell cell({ (int64_t)row_idx, (int64_t)gene.flattened_start }, m_schema, m_file_idx);
+    cell.add_field_ptr("CHROM", gene.chrom.c_str(), gene.chrom.length());
+    cell.add_field("START", gene.start);
+    cell.add_field("END", gene.end);
+    cell.add_field("SCORE", score);
+    cell.add_field_ptr("GENE", gene_name.c_str(), gene_name.length());
+    cell.add_field_ptr("SAMPLE_NAME", sample_name.c_str(), sample_name.length());
+    cell.add_field_ptr("NAME", name.c_str(), name.length());
+
+    OmicsCell end_cell = cell;
+    end_cell.file_idx = -1;
+    end_cell.coords[1] = gene.flattened_end;
+
+    if(gene.flattened_start == gene.flattened_end) {
+      return { cell };
+    }
+    return { cell, end_cell };
+  }
+
+  return {};
 }
 
 int OmicsModule::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema) {
@@ -771,6 +875,9 @@ void TranscriptomicsLoader::add_reader(const std::string& filename) {
   if(std::regex_match(filename, std::regex("(.*)(bed)($)"))) {
     m_files.push_back(std::make_shared<BedReader>(filename, m_schema, m_sample_map, m_files.size()));
   }
+  else if(std::regex_match(filename, std::regex("(.*)(resort)($)"))) {
+    m_files.push_back(std::make_shared<MatrixReader>(filename, m_schema, m_sample_map, m_gene_id_map, m_files.size()));
+  }
 }
 
 SampleMap::SampleMap(const std::string& sample_map) {
@@ -842,11 +949,14 @@ void GeneIdMap::create_from_gtf(const std::string& gene_map, bool use_transcript
       continue;
     }
 
-    uint64_t start, end;
+    std::string chrom = fields[0];
+    uint64_t start, end, flattened_start, flattened_end;
 
     try {
-      start = schema->genomic_map.flatten(fields[0], std::stol(fields[3]));
-      end = schema->genomic_map.flatten(fields[0], std::stol(fields[4]));
+      start = std::stoul(fields[3]);
+      end = std::stoul(fields[4]);
+      flattened_start = schema->genomic_map.flatten(chrom, start);
+      flattened_end = schema->genomic_map.flatten(chrom, end);
     }
     catch (...) {
       continue;
@@ -869,10 +979,10 @@ void GeneIdMap::create_from_gtf(const std::string& gene_map, bool use_transcript
     }
 
     if(map.count(tid)) {
-      std::cout << "gtf reading: " << tid << " is duplicate, old start/end: " << map[tid].first << ", " << map[tid].second << ", new start/end: " << start << ", " << end << std::endl;
+      std::cout << "gtf reading: " << tid << " is duplicate, old start/end: " << map[tid].flattened_start << ", " << map[tid].flattened_end << ", new start/end: " << flattened_start << ", " << flattened_end << std::endl;
     }
 
-    map[tid] = {start, end};
+    map[tid] = Gene(chrom, start, end, flattened_start, flattened_end);
   }
 }
 
@@ -881,7 +991,7 @@ void GeneIdMap::create_from_gi(const std::string& gene_map) {
 
   char version;
   file.read_file(&version, 1);
-  if(version) {
+  if(version != 1) {
     std::cout << "version " << (int)version << " not supported" << std::endl;
   }
 
@@ -889,15 +999,19 @@ void GeneIdMap::create_from_gi(const std::string& gene_map) {
   file.read_file(((char*)&size), 5);
 
   for(int i = 0; i < size; i++) {
-    uint16_t len;
+    uint16_t len; // gene name
     file.read_file((char*)&len, 2);
     char name[len];
     file.read_file(name, len);
+    uint16_t len2; // chrom
+    file.read_file((char*)&len2, 2);
+    char chrom[len2];
+    file.read_file(chrom, len2);
     uint64_t start = 0;
     uint64_t end = 0;
     file.read_file((char*)&start, 5);
     file.read_file((char*)&end, 5);
-    map[std::string(name, len)] = {start, end};
+    map[std::string(name, len)] = Gene(std::string(chrom, len2), start, end, schema->genomic_map.flatten(chrom, start), schema->genomic_map.flatten(chrom, end));
   }
 }
 
@@ -906,22 +1020,26 @@ void GeneIdMap::export_as_gi(const std::string& filename) {
     return FileUtility::write_file(filename, buffer, length);
   };
 
-  char version = 0;
+  char version = 1;
   write(&version, 1);
 
   // write 5B number of entries
   int64_t size = map.size();
   write((char*)&size, 5);
 
-  // write 2B string length, string, 5B start, 5B end
+  // write 2B name length, name, 2B chrom length, chrom, 5B start, 5B end
   for(auto& a : map) {
     std::string name = a.first;
     int16_t len = name.length();
-    uint64_t start = a.second.first;
-    uint64_t end = a.second.second;
+    uint64_t start = a.second.start;
+    uint64_t end = a.second.end;
+    std::string chrom = a.second.chrom;
+    int16_t len2 = chrom.length();
 
     write((char*)&len, 2);
     write(name.c_str(), len);
+    write((char*)&len2, 2);
+    write(chrom.c_str(), len2);
     write((char*)&start, 5);
     write((char*)&end, 5);
   }

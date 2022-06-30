@@ -291,7 +291,34 @@ struct SampleMap {
 };
 
 struct GeneIdMap {
-  std::map<std::string, std::pair<size_t, size_t>> map;
+  struct Gene {
+    Gene(const std::string& chrom, uint64_t start, uint64_t end, uint64_t flattened_start, uint64_t flattened_end): chrom(chrom), 
+                                                                                                                    start(start), 
+                                                                                                                    end(end), 
+                                                                                                                    flattened_start(flattened_start), 
+                                                                                                                    flattened_end(flattened_end) {
+    }
+
+    Gene() = default;
+
+    std::string chrom;
+    uint64_t start;
+    uint64_t end;
+    uint64_t flattened_start;
+    uint64_t flattened_end;
+  };
+
+  size_t count(const std::string& name) {
+    return map.count(name);
+  }
+  size_t size() {
+    return map.size();
+  }
+  Gene& operator[](const std::string& name) {
+    return map[name];
+  }
+
+  std::map<std::string, Gene> map;
   std::shared_ptr<OmicsSchema> schema;
 
   // gene_map is a path to a gtf/gff file
@@ -488,7 +515,7 @@ std::string container_to_string(const T& c) {
   return ss.str();
 }
 
-class OmicsFileReader {
+class OmicsFileReader { // FIXME encode whether cells are end cells (can be deduced by checking position against flattened end, but cumbersome)
   public:
     OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx) : /*m_file(filename),*/ m_reader_util(std::make_shared<FileUtility>(filename)), m_schema(schema), m_sample_map(sample_map), m_file_idx(file_idx) {
     }
@@ -527,6 +554,20 @@ class BedReader : public OmicsFileReader {
   protected:
     std::string m_sample_name;
     uint64_t m_row_idx; // row corresponding to sample
+};
+
+class MatrixReader : public OmicsFileReader {
+  public:
+    MatrixReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, std::shared_ptr<GeneIdMap> gene_id_map, int file_idx);
+    std::vector<OmicsCell> get_next_cells() override;
+  protected:
+    std::shared_ptr<GeneIdMap> m_gene_id_map;
+    std::vector<std::string> m_columns; // can be samples or genes depending on m_position_major
+    bool m_position_major;
+    std::vector<float> m_row_scores; // buffer of scores in current row
+    size_t m_column_idx = 0; // current column position in matrix
+    std::string m_current_token; // can be sample or gene depending on m_position_major
+    bool parse_next(std::string& sample, std::string& gene, float& score);
 };
 
 class OmicsModule {
@@ -627,12 +668,14 @@ class TranscriptomicsLoader : public OmicsLoader {
       const std::string& file_list,
       const std::string& sample_map,
       const std::string& mapping_file,
+      const std::string& gene_mapping_file,
       bool position_major
-    ) : OmicsLoader(workspace, array, file_list, sample_map, mapping_file, position_major) {
+    ) : OmicsLoader(workspace, array, file_list, sample_map, mapping_file, position_major), m_gene_id_map(std::make_shared<GeneIdMap>(gene_mapping_file, m_schema)) {
     }
     virtual void create_schema() override;
   protected:
     virtual void add_reader(const std::string& filename) override;
+    std::shared_ptr<GeneIdMap> m_gene_id_map;
 };
 
 class OmicsReader : public OmicsModule {
