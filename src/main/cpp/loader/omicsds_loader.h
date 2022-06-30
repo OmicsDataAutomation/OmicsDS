@@ -57,15 +57,19 @@ struct FileUtility {
 
   // returns true if line was read
   bool generalized_getline(std::string& retval);
-  static int write_file(std::string filename, std::string str, const bool overwrite=false) {
+  int read_file(void* buffer, size_t chars_to_read); // should work with generalized_getline but not tested
+  static int write_file(std::string filename, const std::string& str, const bool overwrite=false) {
     return TileDBUtils::write_file(filename, str.c_str(), str.size(), overwrite);
+  }
+  static int write_file(std::string filename, const void* buffer, size_t length, const bool overwrite=false) {
+    return TileDBUtils::write_file(filename, buffer, length, overwrite);
   }
 };
 
 struct OmicsFieldInfo {
   enum OmicsFieldType { omics_char, omics_uint8_t, omics_int8_t,
                         omics_uint16_t, omics_int16_t, omics_uint32_t,
-                        omics_int32_t, omics_uint64_t, omics_int64_t };
+                        omics_int32_t, omics_uint64_t, omics_int64_t, omics_float_t };
 
   OmicsFieldInfo(OmicsFieldType type, int _length) : type(type) {
     if(_length < 0) {
@@ -76,22 +80,23 @@ struct OmicsFieldInfo {
     }
   }
   
-  OmicsFieldInfo(std::string type, int _length) {
+  OmicsFieldInfo(const std::string& stype, int _length) {
     if(_length < 0) {
       length = TILEDB_VAR_NUM;
     }
     else {
       length = _length;
     }
-    if(type == "omics_char") { type = omics_char; return; }
-    if(type == "omics_uint8_t") { type = omics_uint8_t; return; }
-    if(type == "omics_int8_t") { type = omics_int8_t; return; }
-    if(type == "omics_uint16_t") { type = omics_uint16_t; return; }
-    if(type == "omics_int16_t") { type = omics_int16_t; return; }
-    if(type == "omics_uint32_t") { type = omics_uint32_t; return; }
-    if(type == "omics_int32_t") { type = omics_int32_t; return; }
-    if(type == "omics_uint64_t") { type = omics_uint64_t; return; }
-    if(type == "omics_int64_t") { type = omics_int64_t; return; }
+    if(stype == "omics_char") { type = omics_char; return; }
+    if(stype == "omics_uint8_t") { type = omics_uint8_t; return; }
+    if(stype == "omics_int8_t") { type = omics_int8_t; return; }
+    if(stype == "omics_uint16_t") { type = omics_uint16_t; return; }
+    if(stype == "omics_int16_t") { type = omics_int16_t; return; }
+    if(stype == "omics_uint32_t") { type = omics_uint32_t; return; }
+    if(stype == "omics_int32_t") { type = omics_int32_t; return; }
+    if(stype == "omics_uint64_t") { type = omics_uint64_t; return; }
+    if(stype == "omics_int64_t") { type = omics_int64_t; return; }
+    if(stype == "omics_float_t") { type = omics_float_t; return; }
     type = omics_uint8_t;
     return;
   }
@@ -110,6 +115,7 @@ struct OmicsFieldInfo {
       case omics_int32_t:  return TILEDB_INT32;
       case omics_uint64_t: return TILEDB_UINT64;
       case omics_int64_t:  return TILEDB_INT64;
+      case omics_float_t:  return TILEDB_FLOAT32;
     }
     return TILEDB_CHAR;
   }
@@ -125,6 +131,7 @@ struct OmicsFieldInfo {
       case omics_int32_t:  return "omics_int32_t";
       case omics_uint64_t: return "omics_uint64_t";
       case omics_int64_t:  return "omics_int64_t";
+      case omics_float_t:  return "omics_float_t";
     }
     return "unknown_type";
   }
@@ -147,6 +154,7 @@ struct OmicsFieldInfo {
       case omics_int32_t:  return 4;
       case omics_uint64_t: return 8;
       case omics_int64_t:  return 8;
+      case omics_float_t:  return 4;
     }
     return 1;
   }
@@ -156,7 +164,7 @@ struct OmicsFieldInfo {
   }
 
   bool operator==(const OmicsFieldInfo& o) {
-    return type == o.type;
+    return type == o.type && length == o.length;
   }
 };
 
@@ -267,6 +275,34 @@ struct OmicsSchema {
   int index_of_attribute(const std::string& name);
 };
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
+
+struct SampleMap {
+  std::map<std::string, size_t> map;
+  SampleMap(const std::string& sample_map);
+  size_t& operator[](const std::string& name) {
+    return map[name];
+  }
+  size_t count(const std::string& name) const {
+    return map.count(name);
+  }
+  size_t size() const {
+    return map.size();
+  }
+};
+
+struct GeneIdMap {
+  std::map<std::string, std::pair<size_t, size_t>> map;
+  std::shared_ptr<OmicsSchema> schema;
+
+  // gene_map is a path to a gtf/gff file
+  // use transcript indicates whether to use transcript_id (true) or gene_id (false)
+  // drop_version removes trailing version number (e.g. ENS001.22 -> ENS001)
+  GeneIdMap(const std::string& gene_map, std::shared_ptr<OmicsSchema> schema, bool use_transcript = true, bool drop_version = true);
+  void create_from_gtf(const std::string& gene_map, bool use_transcript = true, bool drop_version = true);
+  // gi is a bespoke file format that contains only the gene/transcript names and 
+  void create_from_gi(const std::string& gene_map);
+  void export_as_gi(const std::string& filename);
+};
 
 struct OmicsCell {
   std::array<int64_t, 2> coords;
@@ -454,7 +490,7 @@ std::string container_to_string(const T& c) {
 
 class OmicsFileReader {
   public:
-    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : /*m_file(filename),*/ m_reader_util(std::make_shared<FileUtility>(filename)), m_schema(schema), m_file_idx(file_idx) {
+    OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx) : /*m_file(filename),*/ m_reader_util(std::make_shared<FileUtility>(filename)), m_schema(schema), m_sample_map(sample_map), m_file_idx(file_idx) {
     }
 
     const std::string& get_filename() {
@@ -465,18 +501,20 @@ class OmicsFileReader {
 
   protected:
     std::shared_ptr<OmicsSchema> m_schema;
+    std::shared_ptr<SampleMap> m_sample_map;
     int m_file_idx;
     std::shared_ptr<FileUtility> m_reader_util;
 };
 
 class SamReader : public OmicsFileReader {
   public:
-    SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx);
+    SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx);
     ~SamReader();
     std::vector<OmicsCell> get_next_cells() override;
     static std::string cigar_to_string(const uint32_t* cigar, size_t n_cigar);
 
   protected:
+    uint64_t m_row_idx; // row corresponding to sample
     samFile* m_fp; // file pointer
     bam_hdr_t* m_hdr; // header
     bam1_t* m_align; // alignment
@@ -484,13 +522,11 @@ class SamReader : public OmicsFileReader {
 
 class BedReader : public OmicsFileReader {
   public:
-    BedReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx, std::string sample_name) : OmicsFileReader(filename, schema, file_idx), m_sample_name(sample_name), m_file(filename) {
-      std::string str;
-      std::getline(m_file, str);
-    }
+    BedReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx);
+    std::vector<OmicsCell> get_next_cells() override;
   protected:
-    std::ifstream m_file;
     std::string m_sample_name;
+    uint64_t m_row_idx; // row corresponding to sample
 };
 
 class OmicsModule {
@@ -523,6 +559,7 @@ class OmicsLoader : public OmicsModule {
       const std::string& workspace,
       const std::string& array,
       const std::string& file_list,
+      const std::string& sample_map,
       const std::string& mapping_file,
       bool position_major
     );
@@ -533,6 +570,7 @@ class OmicsLoader : public OmicsModule {
     virtual void create_schema() = 0;
     void initialize(); // cannot be part of constructor because it invokes create_schema, which is virtual
   protected:
+    std::shared_ptr<SampleMap> m_sample_map;
     int tiledb_write_buffers();
     std::vector<std::vector<uint8_t>> offset_buffers;
     std::vector<std::vector<uint8_t>> var_buffers; // entries for constant length attributes will be empty
@@ -542,6 +580,7 @@ class OmicsLoader : public OmicsModule {
 
     void buffer_cell(const OmicsCell& cell, int level = 0);
 
+    virtual void add_reader(const std::string& filename) = 0;
     std::string m_file_list;
     std::vector<std::shared_ptr<OmicsFileReader>> m_files;
     typedef std::shared_ptr<OmicsFileReader> omics_fptr;
@@ -570,11 +609,30 @@ class ReadCountLoader : public OmicsLoader {
       const std::string& workspace,
       const std::string& array,
       const std::string& file_list,
+      const std::string& sample_map,
       const std::string& mapping_file,
       bool position_major
-    ) : OmicsLoader(workspace, array, file_list, mapping_file, position_major) {
+    ) : OmicsLoader(workspace, array, file_list, sample_map, mapping_file, position_major) {
     }
     virtual void create_schema() override;
+  protected:
+    virtual void add_reader(const std::string& filename) override;
+};
+
+class TranscriptomicsLoader : public OmicsLoader {
+  public:
+    TranscriptomicsLoader(
+      const std::string& workspace,
+      const std::string& array,
+      const std::string& file_list,
+      const std::string& sample_map,
+      const std::string& mapping_file,
+      bool position_major
+    ) : OmicsLoader(workspace, array, file_list, sample_map, mapping_file, position_major) {
+    }
+    virtual void create_schema() override;
+  protected:
+    virtual void add_reader(const std::string& filename) override;
 };
 
 class OmicsReader : public OmicsModule {
@@ -593,11 +651,12 @@ class OmicsReader : public OmicsModule {
     std::vector<std::vector<uint8_t>> m_buffers_vector;
     std::pair<std::vector<void*>, std::vector<size_t>> prepare_buffers();
     size_t m_buffer_size = 10240;
+    void check(const std::string& name, const OmicsFieldInfo& inf);
 };
 
 class SamExporter : public OmicsReader { // for exporting data as SAM files
   public:
-    SamExporter(const std::string& workspace, const std::string& array) : OmicsReader(workspace, array) {}
+    SamExporter(const std::string& workspace, const std::string& array);
     void export_sams(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, const std::string& ouput_prefix = "sam_output");
 
   protected:

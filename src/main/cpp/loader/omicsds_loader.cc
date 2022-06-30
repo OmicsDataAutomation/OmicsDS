@@ -37,13 +37,19 @@ bool FileUtility::generalized_getline(std::string& retval) {
 
     if(chars_to_read) {
       TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
-       chars_read += chars_to_read;
+      chars_read += chars_to_read;
     }
 
     str_buffer.insert(str_buffer.end(), buffer, buffer + chars_to_read);
   }
 
   return false;
+}
+
+int FileUtility::read_file(void* buffer, size_t chars_to_read) {
+  int rc = TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
+  chars_read += chars_to_read;
+  return rc;
 }
 
 void read_sam_file(std::string filename) {
@@ -341,13 +347,29 @@ bool OmicsCell::is_invalid_cell(const OmicsCell& cell) {
   return cell.coords[0] < 0 || cell.coords[1] < 0;
 }
 
-SamReader::SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, int file_idx) : OmicsFileReader(filename, schema, file_idx) {
+SamReader::SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx) : OmicsFileReader(filename, schema, sample_map, file_idx) {
   m_fp = hts_open(filename.c_str(),"r"); //open bam file
   m_hdr = sam_hdr_read(m_fp); //read header
   m_align = bam_init1(); //initialize an alignment
 
   if(!m_hdr) {
     std::cout << "SamReader header is null" << std::endl;
+  }
+
+  auto toks = split(filename, "/");
+  std::string sample_name = "";
+  if(toks.size()) {
+    sample_name = toks.back();
+  }
+  else {
+    std::cerr << "Error, could not deduce file name for file at path " << filename << std::endl;
+  }
+  if(m_sample_map->count(sample_name)) {
+    m_row_idx = (*m_sample_map)[sample_name];
+  }
+  else {
+    std::cerr << "Error, no entry " << sample_name << " in sample map" << std::endl;
+    exit(1);
   }
 
   assert((bool)schema);
@@ -418,7 +440,7 @@ std::vector<OmicsCell> SamReader::get_next_cells() {
     std::cerr << "\t\t\t\tREMOVE rname len " << std::strlen(chr) << std::endl;
     std::cerr << "\t\t\t\tREMOVE cigar len " << n_cigar << std::endl;
 
-    OmicsCell cell({ (int64_t)m_file_idx, position}, m_schema, m_file_idx);
+    OmicsCell cell({ (int64_t)m_row_idx, position}, m_schema, m_file_idx);
     cell.add_field_ptr("QNAME", qname, std::strlen(qname));
     cell.add_field("FLAG", flag);
     cell.add_field_ptr("RNAME", chr, std::strlen(chr));
@@ -439,7 +461,7 @@ std::vector<OmicsCell> SamReader::get_next_cells() {
     end_cell.file_idx = -1;
     int end_offset = std::abs(tlen) - 1; // FIXME figure out negative template length
     end_cell.coords[1] += end_offset;
-    if(end_offset) {  // if end cell is in same position, only create one cell
+    if(tlen) {  // if end cell is in same position, only create one cell
       std::cout << "REMOVE SamReader::get_next_cells return " << cell.coords[1] << ", " << end_cell.coords[1] << std::endl;
       return { cell, end_cell };
     }
@@ -450,6 +472,81 @@ std::vector<OmicsCell> SamReader::get_next_cells() {
     std::cout << "REMOVE sam_read1 was " << rc << std::endl;
     return { OmicsCell::create_invalid_cell() };
   }
+}
+
+BedReader::BedReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx): OmicsFileReader(filename, schema, sample_map, file_idx) {
+  std::string line;
+  if(!m_reader_util->generalized_getline(line)) {
+    std::cerr << "Error file " << filename << " is empty, skipping" << std::endl;
+    return;
+  }
+
+  std::smatch m;
+  std::regex exp("description\\s*=\\s*\"(.*?)\"");
+  std::regex_search(line, m, exp);
+
+  if(m.size() < 2) {
+    std::cerr << "Error, could not find sample name for file " << filename << std::endl;
+    std::cerr << "First line of Bed file should contain 'description = \"[sample_name]\"'" << std::endl;
+    exit(1);
+  }
+
+  m_sample_name = m[1];
+  std::cout << "************************************** BED sample is " << m_sample_name << std::endl;
+
+  if(!m_sample_map->count(m_sample_name)) {
+    std::cerr << "Error, sample " << m_sample_name << " from file " << filename << " not found in sample map" << std::endl;
+    exit(1);
+  }
+
+  m_row_idx = (*m_sample_map)[m_sample_name];
+}
+
+std::vector<OmicsCell> BedReader::get_next_cells() {
+  std::string line;
+  while(m_reader_util->generalized_getline(line)) {
+    std::stringstream ss(line);
+    std::string str;
+    std::vector<std::string> fields;
+    while(ss >> str) {
+      fields.push_back(str);
+    }
+    if(fields.size() < 5) { continue; }
+
+    std::string chrom = fields[0], gene = "N/A", name = fields[3];
+    uint64_t start, end;
+    float score;
+    
+    try {
+      start = std::stoul(fields[1]);
+      start = m_schema->genomic_map.flatten(chrom, start);
+      end = std::stoul(fields[2]);
+      end = m_schema->genomic_map.flatten(chrom, end);
+      score = std::stof(fields[4]);
+    }
+    catch(...) {
+      continue;
+    }
+
+    OmicsCell cell({ (int64_t)m_row_idx, start }, m_schema, m_file_idx);
+    cell.add_field_ptr("CHROM", chrom.c_str(), chrom.length());
+    cell.add_field("START", start);
+    cell.add_field("END", end);
+    cell.add_field("SCORE", score);
+    cell.add_field_ptr("GENE", gene.c_str(), gene.length());
+    cell.add_field_ptr("SAMPLE_NAME", m_sample_name.c_str(), m_sample_name.length());
+    cell.add_field_ptr("NAME", name.c_str(), name.length());
+
+    OmicsCell end_cell = cell;
+    end_cell.file_idx = -1;
+    end_cell.coords[1] = end;
+
+    if(start == end) {
+      return { cell };
+    }
+    return { cell, end_cell };
+  }
+  return { };
 }
 
 int OmicsModule::tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema) {
@@ -654,46 +751,218 @@ void ReadCountLoader::create_schema() {
   m_schema->attributes.emplace("QUAL", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
 }
 
+void ReadCountLoader::add_reader(const std::string& filename) {
+  if(std::regex_match(filename, std::regex("(.*)(sam)($)"))) {
+    m_files.push_back(std::make_shared<SamReader>(filename, m_schema, m_sample_map, m_files.size()));
+  }
+}
+
+void TranscriptomicsLoader::create_schema() {
+  m_schema->attributes.emplace("CHROM", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("START", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint64_t, 1));
+  m_schema->attributes.emplace("END", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint64_t, 1));
+  m_schema->attributes.emplace("SCORE", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_float_t, 1));
+  m_schema->attributes.emplace("GENE", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1)); // Will be N/A for bed files
+  m_schema->attributes.emplace("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+  m_schema->attributes.emplace("NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1)); // Field in bed files, will be N/A for matrix files
+}
+
+void TranscriptomicsLoader::add_reader(const std::string& filename) {
+  if(std::regex_match(filename, std::regex("(.*)(bed)($)"))) {
+    m_files.push_back(std::make_shared<BedReader>(filename, m_schema, m_sample_map, m_files.size()));
+  }
+}
+
+SampleMap::SampleMap(const std::string& sample_map) {
+  FileUtility file(sample_map);
+
+  std::string line;
+  while(file.generalized_getline(line)) {
+    auto toks = split(line, "\t");
+    if(toks.size() < 2) continue;
+    try {
+      std::string name = toks[0];
+      size_t idx = std::stoul(toks[1]);
+      if(!map.count(name)) {
+        map[name] = idx;
+      }
+    }
+    catch(...) {
+      continue;
+    }
+  }
+}
+
+GeneIdMap::GeneIdMap(const std::string& gene_map, std::shared_ptr<OmicsSchema> schema, bool use_transcript, bool drop_version): schema(schema) {
+  auto toks = split(gene_map, ".");
+  if(!toks.size()) {
+    std::cerr << "Error creating gene map, cannot deduce file format from filename " << gene_map << std::endl;
+    exit(1);
+  }
+
+  std::string format = toks.back();
+
+  if(format == "gtf" || format == "gi") {
+    create_from_gtf(gene_map, use_transcript, drop_version);
+    return;
+  }
+  if(format == "gi") {
+    create_from_gi(gene_map);
+    return;
+  }
+  std::cerr << "Error creating gene map, unsupported file format for filename " << gene_map << " (expected gtf/gff or gi)" << std::endl;
+  exit(1);
+}
+
+void GeneIdMap::create_from_gtf(const std::string& gene_map, bool use_transcript, bool drop_version) {
+  std::string str;
+
+  int ind = -1;
+
+  FileUtility file(gene_map);
+
+  while(file.generalized_getline(str)) {
+    if(str[0] == '#') {
+      continue;
+    }
+
+    ++ind;
+
+    std::stringstream ss(str);
+    std::string field;
+    std::vector<std::string> fields;
+
+    // read the 8 fields before attribute
+    for(int i = 0; i < 8; i++) {
+      ss >> field;
+      fields.push_back(field);
+    }
+
+    if(fields[2] != "transcript") {
+      continue;
+    }
+
+    uint64_t start, end;
+
+    try {
+      start = schema->genomic_map.flatten(fields[0], std::stol(fields[3]));
+      end = schema->genomic_map.flatten(fields[0], std::stol(fields[4]));
+    }
+    catch (...) {
+      continue;
+    }
+
+    std::string attributes;
+    std::getline(ss, attributes);
+
+    int lo, hi;
+    std::string pattern = use_transcript ? "transcript_id" : "gene_id"; // FIXME use regex in case strangeness with whitespace
+
+    lo = attributes.find(pattern) + pattern.length();
+    hi = attributes.find(";", lo);
+
+    std::string tid = attributes.substr(lo, hi - lo);
+    tid.erase(std::remove(tid.begin(), tid.end(), '\"'), tid.end()); // remove quotes
+
+    if(drop_version) {
+      tid = split(tid, ".")[0];
+    }
+
+    if(map.count(tid)) {
+      std::cout << "gtf reading: " << tid << " is duplicate, old start/end: " << map[tid].first << ", " << map[tid].second << ", new start/end: " << start << ", " << end << std::endl;
+    }
+
+    map[tid] = {start, end};
+  }
+}
+
+void GeneIdMap::create_from_gi(const std::string& gene_map) {
+  FileUtility file(gene_map);
+
+  char version;
+  file.read_file(&version, 1);
+  if(version) {
+    std::cout << "version " << (int)version << " not supported" << std::endl;
+  }
+
+  int64_t size = 0;
+  file.read_file(((char*)&size), 5);
+
+  for(int i = 0; i < size; i++) {
+    uint16_t len;
+    file.read_file((char*)&len, 2);
+    char name[len];
+    file.read_file(name, len);
+    uint64_t start = 0;
+    uint64_t end = 0;
+    file.read_file((char*)&start, 5);
+    file.read_file((char*)&end, 5);
+    map[std::string(name, len)] = {start, end};
+  }
+}
+
+void GeneIdMap::export_as_gi(const std::string& filename) {
+  auto write = [&] (const void* buffer, size_t length) {
+    return FileUtility::write_file(filename, buffer, length);
+  };
+
+  char version = 0;
+  write(&version, 1);
+
+  // write 5B number of entries
+  int64_t size = map.size();
+  write((char*)&size, 5);
+
+  // write 2B string length, string, 5B start, 5B end
+  for(auto& a : map) {
+    std::string name = a.first;
+    int16_t len = name.length();
+    uint64_t start = a.second.first;
+    uint64_t end = a.second.second;
+
+    write((char*)&len, 2);
+    write(name.c_str(), len);
+    write((char*)&start, 5);
+    write((char*)&end, 5);
+  }
+}
+
 // FIXME add parallelism of some kind
 // FIXME 
 OmicsLoader::OmicsLoader(
                          const std::string& workspace,
                          const std::string& array,
                          const std::string& file_list,
+                         const std::string& sample_map,
                          const std::string& mapping_file,
                          bool position_major
-                        ): OmicsModule(workspace, array, mapping_file, position_major), m_file_list(file_list), m_pq(comparitor) {}
+                        ): OmicsModule(workspace, array, mapping_file, position_major), m_file_list(file_list), m_sample_map(std::make_shared<SampleMap>(sample_map)), m_pq(comparitor) {}
 
 void OmicsLoader::initialize() { // FIXME move file reader creation to somewhere virtual
   create_schema();
 
+  // set up buffers
   offset_buffers = std::vector<std::vector<uint8_t>>(m_schema->attributes.size());
   var_buffers = std::vector<std::vector<uint8_t>>(m_schema->attributes.size());
   coords_buffer.clear();
   attribute_offsets = std::vector<size_t>(m_schema->attributes.size(), 0);
 
-  // FIXME don't hardcode
-  //tiledb_create_array("/nfs/home/andrei/OmicsDS/build.debug/workspace", "array", *m_schema);
-  //tiledb_open_array("/nfs/home/andrei/OmicsDS/build.debug/workspace/array");
-  
+  // create workspace/array
   tiledb_create_array(m_workspace, m_array, *m_schema);
   tiledb_open_array(m_workspace, m_array);
 
-  std::ifstream f(m_file_list); // initialize OmicsFileReaders from list of filenames
-  std::string s;
-  while(std::getline(f, s)) {
-    if(TileDBUtils::is_file(s)) {
-      //m_files.push_back(std::make_shared<OmicsFileReader>(s));
-      if(std::regex_match(s, std::regex("(.*)(sam)($)"))) {
-        m_files.push_back(std::make_shared<SamReader>(s, m_schema, m_files.size()));
-        std::cout << "REMOVE push sam reader " << s << std::endl;
-      }
-      else {
-        std::cout << "REMOVE would push " << s << std::endl;
-      }
+  serialize_schema();
+
+  // add file readers
+  FileUtility list(m_file_list);
+  std::string filename;
+  while(list.generalized_getline(filename)) {
+    if(TileDBUtils::is_file(filename)) {
+      add_reader(filename);
     }
   }
 
+  // push first cells from all files
   push_from_all_files();
 }
 
@@ -891,6 +1160,33 @@ void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vect
     std::cout << "\t" << a.size() << " bytes" << std::endl;
   }
   std::cout << std::endl;
+}
+
+void OmicsReader::check(const std::string& name, const OmicsFieldInfo& inf) {
+  auto it = m_schema->attributes.find(name);
+  if(it != m_schema->attributes.end()) {
+    if(it->second == inf) { return; }
+    std::cerr << "OmicsReader error, field " << name << " in array does not match type " << inf.type_to_string() << " and/or length " << inf.length_to_string() << std::endl;
+    std::cerr << "From schema: " << it->second.type_to_string() << ", " << it->second.length_to_string() << std::endl;
+    exit(1);
+  }
+  std::cerr << "OmicsReader error, field " << name << " is required" << std::endl;
+  exit(1);
+};
+
+SamExporter::SamExporter(const std::string& workspace, const std::string& array) : OmicsReader(workspace, array) {
+   check("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+   check("QNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+   check("FLAG", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint16_t, 1));
+   check("RNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+   check("POS", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+   check("MAPQ", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint8_t, 1));
+   check("CIGAR", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint32_t, -1));
+   check("RNEXT", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+   check("PNEXT", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+   check("TLEN", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_int32_t, 1));
+   check("SEQ", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
+   check("QUAL", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
 }
 
 void SamExporter::export_sams(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range, const std::string& output_prefix) {

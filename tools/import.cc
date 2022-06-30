@@ -12,12 +12,22 @@ enum ArgsEnum {
 void print_usage() {
   std::cout << "Usage: omicsds_import [options]\n"
             << "where options include:\n"
+            << "Generic options\n"
             << "\t \e[1m--workspace\e[0m, \e[1m-w\e[0m Path to workspace\n"
             << "\t \e[1m--array\e[0m, \e[1m-a\e[0m Name of array (should not include path to workspace)\n"
-            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai\n"
-            << "\t \e[1m--file-list\e[0m, \e[1m-f\e[0m Path to file containing paths to files to be ingested\n"
-            << "\t \e[1m--read-counts\e[0m, \e[1m-r\e[0m Command to ingest read count related data (file list should contain BAM files) \n"
-            << "\t\t Optional";
+            << "Import options\n"
+            << "\t \e[1m--mapping-file\e[0m, \e[1m-m\e[0m Path to file containing information to map from contig/offset pair to flattened coordinates. Currently supports fasta.fai (only needs first 3 columns: contig name, length, and starting index separated by tabs) \n"
+            << "\t \e[1m--file-list\e[0m, \e[1m-f\e[0m Path to file containing paths to files to be ingested (one path per line)\n"
+            << "\t \e[1m--sample-map\e[0m, \e[1m-s\e[0m Path to file containing information mapping between samples names and row indices in OmicsDS (each line is a sample name and an integer row number separated by a tab)\n"
+            << "\t \e[1m--read-counts\e[0m, \e[1m-r\e[0m Command to ingest read count related data (file list should contain SAM files) \n"
+            << "\t\t Optional\n"
+            << "\t \e[1m--transcriptomics\e[0m, \e[1m-t\e[0m Command to transcriptomic data (file list should contain Bed and Matrix files) \n"
+            << "\t\t Optional\n"
+            << "Query options\n"
+            << "\t \e[1m--generic-query\e[0m, \e[1m-g\e[0m Command to perform generic query. WIP. Output is probably not useful.\n"
+            << "\t\t Optional\n"
+            << "\t \e[1m--export-sam\e[0m, Command to export data from query range as sam files, one per sample. Should only be used on data ingested via --read-counts\n"
+            << "\t\t Optional\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -26,22 +36,32 @@ int main(int argc, char* argv[]) {
 
   //read_sam_file("/nfs/home/andrei/benchmarking_requirements/toy.sam");
 
+  enum options_enum { EXPORT_SAM };
+
   static struct option long_options[] = {
     {"workspace",1,0,'w'},
     {"array",1,0,'a'},
     {"mapping-file",1,0,'m'},
     {"file-list",1,0,'f'},
-    {"read-counts",0,0,'r'}
+    {"sample-map",1,0,'s'},
+    {"read-counts",0,0,'r'},
+    {"generic-query", 0, 0, 'g'},
+    {"export-sam", 0, 0, EXPORT_SAM},
+    {"transcriptomics", 0, 0, 't'}
   };
 
   std::string workspace = "";
   std::string array = "";
   std::string mapping_file = "";
   std::string file_list = "";
+  std::string sample_map = "";
   bool read_counts = false;
+  bool generic_query = false;
+  bool export_sam = false;
+  bool transcriptomics;
 
   int c;
-  while ((c=getopt_long(argc, argv, "w:a:m:f:r", long_options, NULL)) >= 0) {
+  while ((c=getopt_long(argc, argv, "w:a:m:f:rs:gt", long_options, NULL)) >= 0) {
     switch (c) {
       case 'w':
         workspace = std::string(optarg);
@@ -55,8 +75,20 @@ int main(int argc, char* argv[]) {
       case 'f':
         file_list = std::string(optarg);
         break;
+      case 's':
+        sample_map = std::string(optarg);
+        break;
       case 'r':
         read_counts = true;
+        break;
+      case 'g':
+        generic_query = true;
+        break;
+      case EXPORT_SAM:
+        export_sam = true;
+        break;
+      case 't':
+        transcriptomics = true;
         break;
       default:
         std::cerr << "Unknown command line argument " << char(c) << "\n";
@@ -75,43 +107,52 @@ int main(int argc, char* argv[]) {
     print_usage();
     return -1;
   }
-  if(mapping_file == "") {
-    std::cerr << "Mapping file required\n";
-    print_usage();
-    return -1;
-  }
-  if(file_list == "") {
-    std::cerr << "File list required\n";
-    print_usage();
-    return -1;
+  if(read_counts || transcriptomics) {
+    if(mapping_file == "") {
+      std::cerr << "Mapping file required\n";
+      print_usage();
+      return -1;
+    }
+    if(file_list == "") {
+      std::cerr << "File list required\n";
+      print_usage();
+      return -1;
+    }
+    if(sample_map == "") {
+      std::cerr << "Sample map required\n";
+      print_usage();
+      return -1;
+    }
   }
 
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
   if(read_counts) {
     {
-      ReadCountLoader l(workspace, array, file_list, mapping_file, true);
+      ReadCountLoader l(workspace, array, file_list, sample_map, mapping_file, true);
       l.initialize();
       std::cout << "After ctor in main" << std::endl;
       l.import();
-      l.serialize_schema();
+    }
+  }
 
-      // FIXME REMOVE
-      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-    
-    {
-      std::cout << "===================================== NORMAL QUERY =========================================" << std::endl;
-      OmicsReader r(workspace, array);
-      //r.query({0, 1}, {59, 61});
-      r.query();
-    }
+  if(transcriptomics) {
+    TranscriptomicsLoader l(workspace, array, file_list, sample_map, mapping_file, true);
+    l.initialize();
+    l.import();
+  }
 
-    {
-      std::cout << "===================================== SAM QUERY =========================================" << std::endl;
-      SamExporter s(workspace, array);
-      s.export_sams();
-    }
+  if(generic_query) {
+    std::cout << "===================================== NORMAL QUERY =========================================" << std::endl;
+    OmicsReader r(workspace, array);
+    //r.query({0, 1}, {59, 61});
+    r.query();
+  }
+
+  if(export_sam) {
+    std::cout << "===================================== SAM QUERY =========================================" << std::endl;
+    SamExporter s(workspace, array);
+    s.export_sams();
   }
 
   /*// FIXME remove
