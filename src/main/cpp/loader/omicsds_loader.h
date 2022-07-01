@@ -40,6 +40,9 @@ std::vector<std::string> split(std::string str, std::string sep);
 // for reading local/cloud files using TileDBUtils api
 struct FileUtility {
   FileUtility(const std::string& filename): filename(filename) {
+    if(!TileDBUtils::is_file(filename)) {
+      std::cerr << "Note: file " << filename << " does not exist" << std::endl;
+    }
     buffer = new char[buffer_size];
     file_size = TileDBUtils::file_size(filename);
     //      m_file_size = 0;
