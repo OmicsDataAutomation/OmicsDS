@@ -47,9 +47,10 @@ bool FileUtility::generalized_getline(std::string& retval) {
 }
 
 int FileUtility::read_file(void* buffer, size_t chars_to_read) {
-  int rc = TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
+  int rcode = TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
   chars_read += chars_to_read;
-  return rc;
+  CHECK_RC(rcode);
+  return rcode;
 }
 
 void read_sam_file(std::string filename) {
