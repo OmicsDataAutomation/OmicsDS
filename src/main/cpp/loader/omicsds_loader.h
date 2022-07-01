@@ -325,14 +325,18 @@ struct GeneIdMap {
   // use transcript indicates whether to use transcript_id (true) or gene_id (false)
   // drop_version removes trailing version number (e.g. ENS001.22 -> ENS001)
   GeneIdMap(const std::string& gene_map, std::shared_ptr<OmicsSchema> schema, bool use_transcript = true, bool drop_version = true);
+  // standard gtf, looks for genes in "transcript" lines
   void create_from_gtf(const std::string& gene_map, bool use_transcript = true, bool drop_version = true);
-  // gi is a bespoke file format that contains only the gene/transcript names and 
+  // gi is a bespoke file format that contains only the gene/transcript names, chromosomes, and offsets
   void create_from_gi(const std::string& gene_map);
+  // tab separated file where each line consists of gene name, contig, starting offset in contig, ending offset in contig
+  // no header
+  void create_from_gbed(const std::string& gene_map);
   void export_as_gi(const std::string& filename);
 };
 
 struct OmicsCell {
-  std::array<int64_t, 2> coords;
+  std::array<int64_t, 2> coords; // sample index, position--does not change with schema order
   std::vector<OmicsFieldData> fields; // must be in schema order
   std::shared_ptr<OmicsSchema> schema;
   int file_idx = -1;
@@ -377,7 +381,7 @@ struct OmicsCell {
     return fields.size() == schema->attributes.size();
   }
 
-  static OmicsCell create_invalid_cell();
+  static OmicsCell create_invalid_cell(); // possibly deprecated
 
   static bool is_invalid_cell(const OmicsCell& cell);
 
@@ -400,109 +404,6 @@ struct OmicsCell {
     return "{" + std::to_string(coords[0]) + ", " + std::to_string(coords[1]) + "}";
   }
 };
-
-/*struct OmicsMultiCell {
-  std::vector<uint8_t> as_cell();
-
-  std::shared_ptr<OmicsSchema> schema;  
-  std::array<int64_t, 2> coords;
-  std::vector<OmicsCell> subcells;
-
-  OmicsMultiCell() {}
-  OmicsMultiCell(std::array<int64_t, 2> coords, std::shared_ptr<OmicsSchema> schema) : coords(coords), schema(schema) {}
-  OmicsMultiCell(const OmicsMultiCell& o) : schema(o.schema),  coords(o.coords), subcells(o.subcells) {}
-  const OmicsMultiCell& operator=(const OmicsMultiCell& o) {
-    schema = o.schema;
-    coords = o.coords;
-    subcells = o.subcells;
-    return *this;
-  }
-
-  bool validate_cell(const OmicsCell& cell) {
-    return cell.fields.size() == schema->attributes.size();
-  }
-
-  size_t push_back(OmicsCell&& elem) {
-    if(!validate_cell(elem)) {
-      return -1;
-    }
-    subcells.emplace_back(elem);
-    return subcells.size() - 1;
-  }
-
-  size_t push_back(const OmicsCell& elem) {
-    if(!validate_cell(elem)) {
-      return -1;
-    }
-    subcells.push_back(elem);
-    return subcells.size() - 1;
-  }
-
-  size_t push_empty_cell(int file_idx = -1) {
-    subcells.emplace_back(schema, file_idx);
-    return subcells.size() - 1;
-  }
-
-  size_t size() {
-    return subcells.size();
-  }
-
-  bool merge(const OmicsMultiCell& o) {
-    if(!equivalent_schema(*schema, *(o.schema)) || coords != o.coords) {
-      return false;
-    }
-    subcells.insert(subcells.begin(), o.subcells.begin(), o.subcells.end());
-    return true;
-  }
-
-  static OmicsMultiCell create_invalid_cell();
-
-  static bool is_invalid_cell(const OmicsMultiCell& cell);
-
-  std::vector<std::vector<uint8_t>> operator[](size_t idx) {
-    std::vector<std::vector<uint8_t>> rv;
-    for(auto& oc : subcells) {
-      rv.push_back(oc.fields[idx].data);
-    }
-    return rv;
-  }
-
-  std::string to_string() {
-    std::stringstream ss;
-    ss << "beginning of cell {" << coords[0] << ", " << coords[1] << "}" << std::endl;
-
-    for(auto& sc : subcells) {
-      ss << "\tsubcell" << std::endl;
-      //for(auto& f : sc.fields) {
-      auto fiter = sc.fields.begin();
-      auto aiter = schema->attributes.begin();
-      for(; fiter != sc.fields.end() && aiter != schema->attributes.end(); fiter++, aiter++) {
-        //ss << "\t\tfield" << std::endl << "\t\t\t";
-        ss << "\t\t" << aiter->first << std::endl << "\t\t\t\t";
-        for(auto& e : fiter->data) {
-          ss << (int)e << "=" << (char)e << " ";
-        }
-        ss << std::endl;
-      }
-    }
-
-    return ss.str();
-  }
-
-  std::string coords_to_string() {
-    return "{" + std::to_string(coords[0]) + ", " + std::to_string(coords[1]) + "}";
-  }
-
-  std::set<int> get_file_idxs() const { // returns file indices that are not -1 (not associated to a file/end cell)
-    std::set<int> rv;
-    for(auto& sc : subcells) {
-      if(sc.file_idx >= 0) {
-        rv.insert(sc.file_idx);
-      }
-    }
-    return rv;
-  }
-};*/
 
 template<class T>
 std::string container_to_string(const T& c) {
@@ -678,9 +579,9 @@ class TranscriptomicsLoader : public OmicsLoader {
     std::shared_ptr<GeneIdMap> m_gene_id_map;
 };
 
-class OmicsReader : public OmicsModule {
+class OmicsExporter : public OmicsModule {
   public:
-    OmicsReader(const std::string& workspace, const std::string& array) : OmicsModule(workspace, array) {
+    OmicsExporter(const std::string& workspace, const std::string& array) : OmicsModule(workspace, array) {
       deserialize_schema();
       tiledb_open_array(false);
     }
@@ -697,7 +598,7 @@ class OmicsReader : public OmicsModule {
     void check(const std::string& name, const OmicsFieldInfo& inf);
 };
 
-class SamExporter : public OmicsReader { // for exporting data as SAM files
+class SamExporter : public OmicsExporter { // for exporting data as SAM files
   public:
     SamExporter(const std::string& workspace, const std::string& array);
     void export_sams(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, const std::string& ouput_prefix = "sam_output");

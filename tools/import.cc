@@ -25,7 +25,7 @@ void print_usage() {
             << "\t\t Optional\n"
             << "\t \e[1m--transcriptomics\e[0m, \e[1m-t\e[0m Command to transcriptomic data (file list should contain Bed and Matrix files) \n"
             << "\t\t Optional\n"
-            << "\t\t \e[1m--gene-mapping-file\e[0m, Path to gtf/gff/gi v1 file for use with transcriptomics \n"
+            << "\t\t \e[1m--gene-mapping-file\e[0m, Path to gtf/gff/gi v1/gbed file for use with transcriptomics \n"
             << "Query options\n"
             << "\t \e[1m--generic-query\e[0m, \e[1m-g\e[0m Command to perform generic query. WIP. Output is probably not useful.\n"
             << "\t\t Optional\n"
@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
 
   if(generic_query) {
     std::cout << "===================================== NORMAL QUERY =========================================" << std::endl;
-    OmicsReader r(workspace, array);
+    OmicsExporter r(workspace, array);
     //r.query({0, 1}, {59, 61});
     r.query();
   }

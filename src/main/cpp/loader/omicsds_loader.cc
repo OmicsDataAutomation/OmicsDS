@@ -173,20 +173,6 @@ GenomicMap::GenomicMap(std::shared_ptr<FileUtility> mapping_reader): m_mapping_r
     std::cout << "(" << c.name << ", " << c.length << ", " << c.starting_index << ")" << std::endl;
   }
   std::cout << std::endl << std::endl;
-
-  // FIXME REMOVE
-  /*std::cout << "name orders" << std::endl;
-  for(auto& i : idxs_name) {
-    std::cout << i << std::endl;
-  }
-  std::cout << std::endl << std::endl;
-
-  std::cout << "position orders" << std::endl;
-  for(auto& i : idxs_position) {
-    std::cout << i << std::endl;
-  }
-  std::cout << std::endl << std::endl;
-  */
 }
 
 uint64_t GenomicMap::flatten(std::string contig_name, uint64_t offset) {
@@ -567,7 +553,7 @@ MatrixReader::MatrixReader(std::string filename, std::shared_ptr<OmicsSchema> sc
   else {
     std::cerr << "Error reading file " << filename << std::endl;
     std::cerr << "Matrix files should be tab separated in format: " << std::endl;
-    std::cerr << "Gene\t[gene1]\t[gene2]" <<  std::endl;
+    std::cerr << "GENE\t[gene1]\t[gene2]" <<  std::endl;
     std::cerr << "[sample1]\t[score1]\t[score2]" << std::endl;
     std::cerr << "Or the transpose (keyword SAMPLE instead of GENE, genes across rows)" << std::endl;
   }
@@ -577,6 +563,7 @@ MatrixReader::MatrixReader(std::string filename, std::shared_ptr<OmicsSchema> sc
   }
   m_columns = std::vector<std::string>(toks.begin() + 1, toks.end());
   m_row_scores = std::vector<float>(m_columns.size(), 0);
+  m_column_idx = m_columns.size(); // to force parsing next line
 }
 
 bool MatrixReader::parse_next(std::string& sample, std::string& gene, float& score) {
@@ -917,6 +904,10 @@ GeneIdMap::GeneIdMap(const std::string& gene_map, std::shared_ptr<OmicsSchema> s
     create_from_gi(gene_map);
     return;
   }
+  if(format == "gbed") {
+    create_from_gbed(gene_map);
+    return;
+  }
   std::cerr << "Error creating gene map, unsupported file format for filename " << gene_map << " (expected gtf/gff or gi)" << std::endl;
   exit(1);
 }
@@ -965,14 +956,17 @@ void GeneIdMap::create_from_gtf(const std::string& gene_map, bool use_transcript
     std::string attributes;
     std::getline(ss, attributes);
 
-    int lo, hi;
     std::string pattern = use_transcript ? "transcript_id" : "gene_id"; // FIXME use regex in case strangeness with whitespace
 
-    lo = attributes.find(pattern) + pattern.length();
-    hi = attributes.find(";", lo);
+    std::smatch m;
+    std::regex exp(pattern + "\\s*\"(.*?)\"");
+    std::regex_search(str, m, exp);
 
-    std::string tid = attributes.substr(lo, hi - lo);
-    tid.erase(std::remove(tid.begin(), tid.end(), '\"'), tid.end()); // remove quotes
+    if(m.size() < 2) {
+      continue;
+    }
+ 
+    std::string tid = m[1];
 
     if(drop_version) {
       tid = split(tid, ".")[0];
@@ -1012,6 +1006,26 @@ void GeneIdMap::create_from_gi(const std::string& gene_map) {
     file.read_file((char*)&start, 5);
     file.read_file((char*)&end, 5);
     map[std::string(name, len)] = Gene(std::string(chrom, len2), start, end, schema->genomic_map.flatten(chrom, start), schema->genomic_map.flatten(chrom, end));
+  }
+}
+
+void GeneIdMap::create_from_gbed(const std::string& gene_map) {
+  FileUtility file(gene_map);
+
+  std::string str;
+  while(file.generalized_getline(str)) {
+    auto toks = split(str, "\t");
+    if(toks.size() < 4) { continue; }
+    std::string chrom = toks[1];
+    uint64_t start, end;
+    try {
+      start = std::stoul(toks[2]);
+      end = std::stoul(toks[3]);
+    }
+    catch(...) {
+      continue;
+    }
+    map[toks[0]] = Gene(chrom, start, end, schema->genomic_map.flatten(chrom, start), schema->genomic_map.flatten(chrom, end));
   }
 }
 
@@ -1164,7 +1178,7 @@ void OmicsLoader::import() {
   //}
 }
 
-std::pair<std::vector<void*>, std::vector<size_t>> OmicsReader::prepare_buffers() {
+std::pair<std::vector<void*>, std::vector<size_t>> OmicsExporter::prepare_buffers() {
   m_buffers_vector.clear();
   std::vector<void*> pointers;
   std::vector<size_t> sizes;
@@ -1184,7 +1198,7 @@ std::pair<std::vector<void*>, std::vector<size_t>> OmicsReader::prepare_buffers(
   return { pointers, sizes };
 }
 
-void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range, process_function proc) {
+void OmicsExporter::query(std::array<int64_t, 2> sample_range, std::array<int64_t, 2> position_range, process_function proc) {
   auto[pointers_vec, sizes_vec] = prepare_buffers();
   void** pointers = pointers_vec.data();
   size_t* sizes = sizes_vec.data();
@@ -1271,7 +1285,7 @@ void OmicsReader::query(std::array<int64_t, 2> sample_range, std::array<int64_t,
   tiledb_array_iterator_finalize(tiledb_array_it);
 }
 
-void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data) {
+void OmicsExporter::process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data) {
   std::cout << "process " << coords[0] << ", " << coords[1] << ", " << coords[2] << std::endl;
   std::cout << data.size() << " fields" << std::endl;
   for(auto& a : data) {
@@ -1280,19 +1294,19 @@ void OmicsReader::process(const std::array<uint64_t, 3>& coords, const std::vect
   std::cout << std::endl;
 }
 
-void OmicsReader::check(const std::string& name, const OmicsFieldInfo& inf) {
+void OmicsExporter::check(const std::string& name, const OmicsFieldInfo& inf) {
   auto it = m_schema->attributes.find(name);
   if(it != m_schema->attributes.end()) {
     if(it->second == inf) { return; }
-    std::cerr << "OmicsReader error, field " << name << " in array does not match type " << inf.type_to_string() << " and/or length " << inf.length_to_string() << std::endl;
+    std::cerr << "OmicsExporter error, field " << name << " in array does not match type " << inf.type_to_string() << " and/or length " << inf.length_to_string() << std::endl;
     std::cerr << "From schema: " << it->second.type_to_string() << ", " << it->second.length_to_string() << std::endl;
     exit(1);
   }
-  std::cerr << "OmicsReader error, field " << name << " is required" << std::endl;
+  std::cerr << "OmicsExporter error, field " << name << " is required" << std::endl;
   exit(1);
 };
 
-SamExporter::SamExporter(const std::string& workspace, const std::string& array) : OmicsReader(workspace, array) {
+SamExporter::SamExporter(const std::string& workspace, const std::string& array) : OmicsExporter(workspace, array) {
    check("SAMPLE_NAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
    check("QNAME", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_char, -1));
    check("FLAG", OmicsFieldInfo(OmicsFieldInfo::OmicsFieldType::omics_uint16_t, 1));
