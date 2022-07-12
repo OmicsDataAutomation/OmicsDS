@@ -1,0 +1,14 @@
+r001	163	1	7	30	8M4I4M1D3M	0	36	39	TTAGATAAAGAGGATACTG	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿXXBS
+r002	0	1	9	30	1S2I6M1P1I1P1I4M2I	-1	-1	0	AAAAGATAAGGGATAAA	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+r003	0	1	10	30	5H6M	-1	-1	0	AGCTAA	ÿÿÿÿÿÿ
+r004	0	1	16	30	6M14N1I5M	-1	-1	0	ATAGCTCTCAGC	ÿÿÿÿÿÿÿÿÿÿÿÿ
+r003	16	1	29	30	6H5M	-1	-1	0	TAGGC	ÿÿÿÿÿ((!Bÿÿÿÿÿÿÿÿÿÿÿÿ
+r001	83	1	37	30	9M	0	6	-39	CAGCGCCAT	ÿÿÿÿÿÿÿÿÿ((!Bÿÿÿÿÿÿÿÿÿÿÿÿ
+r001	163	1	7	30	8M4I4M1D3M	0	36	39	TTAGATAAAGAGGATACTG	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿXXBS
+r001	83	1	37	30	9M	0	6	-39	CAGCGCCAT	ÿÿÿÿÿÿÿÿÿ((!Bÿÿÿÿÿÿÿÿÿÿÿÿ
+x1	0	2	1	30	20M	-1	-1	0	AGGTTTTATAAAACAAATAA	ÿÿÿÿ
+x2	0	2	2	30	21M	-1	-1	0	GGTTTTATAAAACAAATAATT	ÿÿ
+x3	0	2	6	30	9M4I13M	-1	-1	0	TTATAAAACAAATAATTAAGTCTACA	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+x4	0	2	10	30	25M	-1	-1	0	CAAATAATTAAGTCTACAGAGCAAC	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+x5	0	2	12	30	24M	-1	-1	0	AATAATTAAGTCTACAGAGCAACT	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+x6	0	2	14	30	23M	-1	-1	0	TAATTAAGTCTACAGAGCAACTA	ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ

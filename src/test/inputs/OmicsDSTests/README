@@ -1,0 +1,10 @@
+Directory with example use cases for OmicsDS
+Note: as of time of writing, the workspace should be deleted before running ingestion
+
+Example 1: ingest and export two sam files
+Note: the sample name for sam files is the filename stripped of the path (e.g. toy.sam)
+<path to OmicsDS build dir>/tools/omicsds_import -m human_g1k_v37.fasta.fai -w workspace -a array -f sam_list -r -s sam_map --export-sam
+
+Example 2: ingest small matrix file and perform generic query
+Note: the sample name for bed files must be specified in the header by the string 'description="[sample_name]"', see s0.bed and s1.bed
+<path to OmicsDS build dir>/tools/omicsds_import -m human_g1k_v37.fasta.fai -w workspace -a array -f small_list -s small_map -t -g --gene-mapping-file map_ends.gbed
