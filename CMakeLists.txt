@@ -49,7 +49,11 @@ execute_process(
 set(OMICSDS_RELEASE_VERSION "0.0.1-SNAPSHOT" CACHE STRING "OmicsDS release version")
 set(OMICSDS_VERSION "${OMICSDS_RELEASE_VERSION}-${GIT_COMMIT_HASH}" CACHE STRING "OmicsDS full version string")
 
-set(DISABLE_OPENMP False CACHE BOOL "Disable OpenMP")
+if(APPLE)
+  set(DISABLE_OPENMP True CACHE BOOL "Disable OpenMP")
+else()
+  set(DISABLE_OPENMP False CACHE BOOL "Disable OpenMP")
+endif()
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
