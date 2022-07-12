@@ -1,5 +1,6 @@
 #pragma once
 //#include <htslib/sam.h>
+#include <array>
 #include <iostream>
 #include <map>
 #include <vector>
