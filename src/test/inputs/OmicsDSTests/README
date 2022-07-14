@@ -7,4 +7,4 @@ Note: the sample name for sam files is the filename stripped of the path (e.g. t
 
 Example 2: ingest small matrix file and perform generic query
 Note: the sample name for bed files must be specified in the header by the string 'description="[sample_name]"', see s0.bed and s1.bed
-<path to OmicsDS build dir>/tools/omicsds_import -m human_g1k_v37.fasta.fai -w workspace -a array -f small_list -s small_map -t -g --gene-mapping-file map_ends.gbed
+<path to OmicsDS build dir>/tools/omicsds_import -m human_g1k_v37.fasta.fai -w workspace -a array -f small_list -s small_map -i -g --gene-mapping-file map_ends.gbed

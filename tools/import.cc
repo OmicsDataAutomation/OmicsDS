@@ -22,15 +22,15 @@ void print_usage() {
             << "\t \e[1m--sample-map\e[0m, \e[1m-s\e[0m Path to file containing information mapping between samples names and row indices in OmicsDS (each line is a sample name and an integer row number separated by a tab)\n"
             << "\t \e[1m--sample-major\e[0m, Indicates that data from input files should be stored in sample major order on disk (cells for the same sample stored contiguously). Default behavior is position major\n"
             << "\t\t Optional\n"
-            << "\t \e[1m--read-counts\e[0m, \e[1m-r\e[0m Command to ingest read count related data (file list should contain SAM files) \n"
+            << "\t \e[1m--read-level\e[0m, \e[1m-r\e[0m Command to ingest read level related data (file list should contain SAM files) \n"
             << "\t\t Optional\n"
-            << "\t \e[1m--transcriptomics\e[0m, \e[1m-t\e[0m Command to transcriptomic data (file list should contain Bed and Matrix files) \n"
+            << "\t \e[1m--interval-level\e[0m, \e[1m-i\e[0m Command to ingest interval level data (file list should contain Bed and Matrix files) \n"
             << "\t\t Optional\n"
             << "\t\t \e[1m--gene-mapping-file\e[0m, Path to gtf/gff/gi v1/gbed file for use with transcriptomics \n"
             << "Query options\n"
             << "\t \e[1m--generic-query\e[0m, \e[1m-g\e[0m Command to perform generic query. WIP. Output is probably not useful.\n"
             << "\t\t Optional\n"
-            << "\t \e[1m--export-sam\e[0m, Command to export data from query range as sam files, one per sample. Should only be used on data ingested via --read-counts\n"
+            << "\t \e[1m--export-sam\e[0m, Command to export data from query range as sam files, one per sample. Should only be used on data ingested via --read-level\n"
             << "\t\t Optional\n";
 }
 
@@ -48,10 +48,10 @@ int main(int argc, char* argv[]) {
     {"mapping-file",1,0,'m'},
     {"file-list",1,0,'f'},
     {"sample-map",1,0,'s'},
-    {"read-counts",0,0,'r'},
+    {"read-level",0,0,'r'},
     {"generic-query", 0, 0, 'g'},
     {"export-sam", 0, 0, EXPORT_SAM},
-    {"transcriptomics", 0, 0, 't'},
+    {"interval-level", 0, 0, 'i'},
     {"sample-major", 0, 0, SAMPLE_MAJOR},
     {"gene-mapping-file", 1, 0, GENE_MAPPING_FILE}
   };
@@ -61,15 +61,15 @@ int main(int argc, char* argv[]) {
   std::string mapping_file = "";
   std::string file_list = "";
   std::string sample_map = "";
-  bool read_counts = false;
+  bool read_level = false;
   bool generic_query = false;
   bool export_sam = false;
-  bool transcriptomics = false;
+  bool interval_level = false;
   bool position_major = true;
   std::string gene_mapping_file = "";
 
   int c;
-  while ((c=getopt_long(argc, argv, "w:a:m:f:rs:gt", long_options, NULL)) >= 0) {
+  while ((c=getopt_long(argc, argv, "w:a:m:f:rs:gi", long_options, NULL)) >= 0) {
     switch (c) {
       case 'w':
         workspace = std::string(optarg);
@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
         sample_map = std::string(optarg);
         break;
       case 'r':
-        read_counts = true;
+        read_level = true;
         break;
       case 'g':
         generic_query = true;
@@ -95,8 +95,8 @@ int main(int argc, char* argv[]) {
       case EXPORT_SAM:
         export_sam = true;
         break;
-      case 't':
-        transcriptomics = true;
+      case 'i':
+        interval_level = true;
         break;
       case SAMPLE_MAJOR:
         position_major = false;
@@ -121,7 +121,7 @@ int main(int argc, char* argv[]) {
     print_usage();
     return -1;
   }
-  if(read_counts || transcriptomics) {
+  if(read_level || interval_level) {
     if(mapping_file == "") {
       std::cerr << "Mapping file required\n";
       print_usage();
@@ -139,7 +139,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  if(transcriptomics) {
+  if(interval_level) {
     if(gene_mapping_file == "") {
       std::cerr << "Gene mapping file required\n";
       print_usage();
@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
-  if(read_counts) {
+  if(read_level) {
     {
       ReadCountLoader l(workspace, array, file_list, sample_map, mapping_file, position_major);
       l.initialize();
@@ -158,7 +158,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  if(transcriptomics) {
+  if(interval_level) {
     TranscriptomicsLoader l(workspace, array, file_list, sample_map, mapping_file, gene_mapping_file, position_major);
     l.initialize();
     l.import();
