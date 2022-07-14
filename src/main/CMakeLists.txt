@@ -32,6 +32,7 @@ set(OMICSDB_INCLUDE
 
 set(OMICSDS_SOURCES
   ${OMICSDS_CPP}/loader/omicsds_loader.cc
+  ${OMICSDS_CPP}/loader/omicsds_export.cc
   )
 
 # Use PIC

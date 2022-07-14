@@ -1,4 +1,34 @@
+/**
+ * src/main/cpp/loader/omicsds_loader.h
+ *
+ * The MIT License (MIT)
+ * Copyright (c) 2022 Omics Data Automation, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of 
+ * this software and associated documentation files (the "Software"), to deal in 
+ * the Software without restriction, including without limitation the rights to 
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+ * the Software, and to permit persons to whom the Software is furnished to do so, 
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all 
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+ * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Specification for a generic SAM reader
+ */
+
 #pragma once
+
+#include "omicsds_schema.h"
+#include "omicsds_storage.h"
+
 #include <array>
 #include <iostream>
 #include <map>
@@ -19,228 +49,12 @@
 #include <numeric>
 #include <algorithm>
 #include <utility>
-#include "tiledb.h"
-#include "tiledb_utils.h"
-#include "tiledb_storage.h"
-
-#define CHECK_RC(...)                                      \
-do {                                                       \
-  int rc = __VA_ARGS__;                                    \
-  if (rc) {                                                \
-    printf("%s", &tiledb_errmsg[0]);                       \
-    printf("[Examples::%s] Runtime Error.\n", __FILE__);   \
-    return rc;                                             \
-  }                                                        \
-} while (false)
 
 void read_sam_file(std::string filename);
 
 // split str into tokens by sep
 // similar to java/python split
 std::vector<std::string> split(std::string str, std::string sep);
-
-// for reading/writing local/cloud files using TileDBUtils api
-struct FileUtility {
-  // only need to construct for reading, write functionality is static
-  FileUtility(const std::string& filename): filename(filename) {
-    if(!TileDBUtils::is_file(filename)) {
-      std::cerr << "Note: file " << filename << " does not exist" << std::endl;
-    }
-    buffer = new char[buffer_size];
-    file_size = TileDBUtils::file_size(filename);
-    //      m_file_size = 0;
-  }
-  ~FileUtility() {
-    delete[] buffer;
-  }
-
-  std::string filename;
-  ssize_t file_size = 0;
-  ssize_t chars_read = 0;
-  const int buffer_size = 512;
-  char* buffer;
-  std::string str_buffer;
-
-  // returns true if line was read
-  // provides similar functionality to std::getline but also supports cloud files
-  bool generalized_getline(std::string& retval);
-  // read specified number of bytes from file, 
-  // should work with generalized_getline but not tested
-  // returns tiledb return code
-  int read_file(void* buffer, size_t chars_to_read);
-
-  // write string to file
-  // returns tiledb return code
-  static int write_file(std::string filename, const std::string& str, const bool overwrite=false) {
-    auto rcode = TileDBUtils::write_file(filename, str.c_str(), str.size(), overwrite);
-    CHECK_RC(rcode);
-    return rcode;
-  }
-  // write buffer to file
-  // returns tiledb return code
-  static int write_file(std::string filename, const void* buffer, size_t length, const bool overwrite=false) {
-    auto rcode = TileDBUtils::write_file(filename, buffer, length, overwrite);
-    CHECK_RC(rcode);
-    return rcode;
-  }
-};
-
-// struct to store type/length information about fields
-// also provides utility fucntions to go to/from string/tiledb types
-struct OmicsFieldInfo {
-  enum OmicsFieldType { omics_char, omics_uint8_t, omics_int8_t,
-                        omics_uint16_t, omics_int16_t, omics_uint32_t,
-                        omics_int32_t, omics_uint64_t, omics_int64_t, omics_float_t };
-
-  // OmicsFieldInfo treats negative lengths as variable
-  OmicsFieldInfo(OmicsFieldType type, int _length) : type(type) {
-    if(_length < 0) {
-      length = TILEDB_VAR_NUM;
-    }
-    else {
-      length = _length;
-    }
-  }
-  
-  // string constructor, used when deserializing human readable schema
-  OmicsFieldInfo(const std::string& stype, int _length) {
-    if(_length < 0) {
-      length = TILEDB_VAR_NUM;
-    }
-    else {
-      length = _length;
-    }
-    if(stype == "omics_char") { type = omics_char; return; }
-    if(stype == "omics_uint8_t") { type = omics_uint8_t; return; }
-    if(stype == "omics_int8_t") { type = omics_int8_t; return; }
-    if(stype == "omics_uint16_t") { type = omics_uint16_t; return; }
-    if(stype == "omics_int16_t") { type = omics_int16_t; return; }
-    if(stype == "omics_uint32_t") { type = omics_uint32_t; return; }
-    if(stype == "omics_int32_t") { type = omics_int32_t; return; }
-    if(stype == "omics_uint64_t") { type = omics_uint64_t; return; }
-    if(stype == "omics_int64_t") { type = omics_int64_t; return; }
-    if(stype == "omics_float_t") { type = omics_float_t; return; }
-    type = omics_uint8_t;
-    return;
-  }
-
-  OmicsFieldType type;
-  int length; // number of elements, -1 encodes variable
-
-  int tiledb_type() const {
-    switch(type) {
-      case omics_char:     return TILEDB_CHAR;
-      case omics_uint8_t:  return TILEDB_UINT8;
-      case omics_int8_t:   return TILEDB_INT8;
-      case omics_uint16_t: return TILEDB_UINT16;
-      case omics_int16_t:  return TILEDB_INT16;
-      case omics_uint32_t: return TILEDB_UINT32;
-      case omics_int32_t:  return TILEDB_INT32;
-      case omics_uint64_t: return TILEDB_UINT64;
-      case omics_int64_t:  return TILEDB_INT64;
-      case omics_float_t:  return TILEDB_FLOAT32;
-    }
-    return TILEDB_CHAR;
-  }
-
-  // used to serialize schema
-  std::string type_to_string() const {
-    switch(type) {
-      case omics_char:     return "omics_char";
-      case omics_uint8_t:  return "omics_uint8_t";
-      case omics_int8_t:   return "omics_int8_t";
-      case omics_uint16_t: return "omics_uint16_t";
-      case omics_int16_t:  return "omics_int16_t";
-      case omics_uint32_t: return "omics_uint32_t";
-      case omics_int32_t:  return "omics_int32_t";
-      case omics_uint64_t: return "omics_uint64_t";
-      case omics_int64_t:  return "omics_int64_t";
-      case omics_float_t:  return "omics_float_t";
-    }
-    return "unknown_type";
-  }
-
-  std::string length_to_string() const {
-    if(length == TILEDB_VAR_NUM) {
-      return "variable";
-    }
-    return std::to_string(length);
-  }
-
-  int element_size() {
-    switch(type) {
-      case omics_char:     return 1;
-      case omics_uint8_t:  return 1;
-      case omics_int8_t:   return 1;
-      case omics_uint16_t: return 2;
-      case omics_int16_t:  return 2;
-      case omics_uint32_t: return 4;
-      case omics_int32_t:  return 4;
-      case omics_uint64_t: return 8;
-      case omics_int64_t:  return 8;
-      case omics_float_t:  return 4;
-    }
-    return 1;
-  }
-
-  bool is_variable() {
-    return length == TILEDB_VAR_NUM;
-  }
-
-  bool operator==(const OmicsFieldInfo& o) {
-    return type == o.type && length == o.length;
-  }
-};
-
-// stores field data backed by vector
-struct OmicsFieldData {
-  std::vector<uint8_t> data;
-  size_t size() const {
-    return data.size();
-  }
-  uint8_t operator[](size_t idx) {
-    return data[idx];
-  }
-  // templated utilty function to insert elements of potentially more than one byte into vector
-  template<class T>
-  static void push_back(std::vector<uint8_t>& v, const T& elem) {
-    auto size = v.size();
-    v.resize(v.size() + sizeof(elem));
-    T* ptr = reinterpret_cast<T*>(v.data() + size);
-    *ptr = elem;
-  }
-
-  template<class T>
-  void push_back(const T& elem) {
-    push_back(data, elem);
-  }
-
-  // templated utilty function to insert elements of potentially more than one byte into vector via pointer
-  // useful for c strings/vectors
-  template<class T>
-  void push_pointer_back(const T* elem_ptr, int n) {
-    size_t size = data.size();
-    data.resize(data.size() + sizeof(T)*n);
-    T* ptr = reinterpret_cast<T*>(data.data() + size);
-
-    for(int i = 0; i < n; i++) {
-      ptr[i] = elem_ptr[i];
-    }
-  }
-  
-  template<class T>
-  const T* get_ptr() const {
-    return (T*)data.data();
-  }
-  template<class T>
-  T get(int idx = 0) const { // FIXME check bounds?
-    return ((T*)data.data())[idx];
-  }
-  template<class T>
-  int typed_size() const {
-    return data.size() / sizeof(T);
-  }
-};
 
 struct contig {
   std::string name;
@@ -253,84 +67,6 @@ struct contig {
     FileUtility::write_file(path, str);
   }
 };
-
-// datastructure that keeps contigs sorted by name and position
-class GenomicMap {
-public:
-  GenomicMap() {}
-  // construct from file at path mapping_file
-  GenomicMap(const std::string& mapping_file);
-  // construct from extant FileUtility
-  // used to deserialize omics schema after attributes are read from same file
-  GenomicMap(std::shared_ptr<FileUtility> mapping_reader);
-  // map from contig_name and offset to single coordinate for use in tiledb
-  uint64_t flatten(std::string contig_name, uint64_t offset);
-  // reverse of flatten
-  std::pair<std::string, uint64_t> unflatten(uint64_t position);
-  // human readably serialize contig information
-  // used as subset of serialized schema
-  void serialize(std::string path);
-
-  // struct to represent contigs in memory
-  struct contig {
-    std::string name;
-    uint64_t length;
-    uint64_t starting_index;
-
-    contig(const std::string& name, uint64_t length, uint64_t starting_index): name(name), length(length), starting_index(starting_index) {}
-    // serialize individual contig
-    // used by GenomicMap::serialize
-    void serialize(std::string path) {
-      std::string str = name + "\t" + std::to_string(length) + "\t" + std::to_string(starting_index) + "\n";
-      FileUtility::write_file(path, str);
-    }
-  };
-
-private:
-  std::shared_ptr<FileUtility> m_mapping_reader;
-  std::vector<contig> contigs;
-  // indices from GenomicMap::contigs sorted by contig name
-  // used by flatten
-  std::vector<size_t> idxs_name;
-  // indices from GenomicMap::contigs sorted by starting offeset
-  // used by unflatten
-  std::vector<size_t> idxs_position;
-};
-
-// schema for array
-// contains attributes and a GenomicMap
-struct OmicsSchema {
-  enum OmicsStorageOrder { POSITION_MAJOR, SAMPLE_MAJOR };
-  OmicsStorageOrder order;
-
-  OmicsSchema() {}
-  OmicsSchema(const std::string& mapping_file, OmicsStorageOrder order = POSITION_MAJOR): genomic_map(mapping_file), order(order) {}
-  OmicsSchema(const std::string& mapping_file, bool position_major = true): genomic_map(mapping_file) {
-    order = position_major ? POSITION_MAJOR : SAMPLE_MAJOR;
-  }
-  bool create_from_file(const std::string& path);
-  bool position_major() const {
-    return order == POSITION_MAJOR;
-  }
-  // swaps between standard and schema order
-  // standard order is SAMPLE, POSITION, will swap if position major
-  template<class T, size_t U>
-  std::array<T, U> swap_order(const std::array<T, U>& coords) {
-    std::array<T, U> retval = coords;
-    if(position_major()) {
-      std::swap(retval[0], retval[1]);
-    }
-    return retval;
-  }
-  std::map<std::string, OmicsFieldInfo> attributes; // implies canonical order (lexicographically sorted by name)
-  GenomicMap genomic_map;
-  void serialize(std::string path);
-  // get index of attribute by name
-  // useful because fields in OmicsCell are in the same order as in OmicsSchema
-  int index_of_attribute(const std::string& name);
-};
-
-bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r);
 
 // maps from sample name to (logical) row in OmicsDS
 struct SampleMap {
@@ -525,7 +261,6 @@ class SamReader : public OmicsFileReader {
     SamReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx);
     ~SamReader();
     std::vector<OmicsCell> get_next_cells() override;
-    static std::string cigar_to_string(const uint32_t* cigar, size_t n_cigar);
 
   protected:
     uint64_t m_row_idx; // row corresponding to sample
@@ -570,31 +305,6 @@ class MatrixReader : public OmicsFileReader {
     size_t m_column_idx = 0; // current column position in matrix
     std::string m_current_token; // can be sample or gene depending on m_position_major
     bool parse_next(std::string& sample, std::string& gene, float& score);
-};
-
-// common base class for OmicsLoader and OmicsExporter with various common functionalities
-class OmicsModule {
-  public:
-    OmicsModule(const std::string& workspace, const std::string& array) : m_workspace(workspace), m_array(array) {}
-    OmicsModule(const std::string& workspace, const std::string& array, const std::string& mapping_file, bool position_major) : m_workspace(workspace), m_array(array), m_schema(std::make_shared<OmicsSchema>(mapping_file, position_major)) {}
-    void serialize_schema(std::string path) { m_schema->serialize(path); }
-    void serialize_schema() { serialize_schema(m_workspace + "/" + m_array + "/omics_schema"); }
-    void deserialize_schema(std::string path) { m_schema.reset(); m_schema = std::make_shared<OmicsSchema>(); m_schema->create_from_file(path); }
-    void deserialize_schema() { deserialize_schema(m_workspace + "/" + m_array + "/omics_schema"); };
-
-  protected:
-    std::string m_workspace;
-    std::string m_array;
-    // tiledb* functions return tiledb return code
-    int tiledb_create_array(const std::string& workspace, const std::string& array_name, const OmicsSchema& schema);
-    int tiledb_create_array() { return tiledb_create_array(m_workspace, m_array, *m_schema); }
-    int tiledb_open_array(const std::string& workspace, const std::string& array_name, bool write = true);
-    int tiledb_open_array(bool write = true) { return tiledb_open_array(m_workspace, m_array, write); }
-    int tiledb_close_array();
-    TileDB_CTX* m_tiledb_ctx;
-    TileDB_Array* m_tiledb_array;
-    std::shared_ptr<OmicsSchema> m_schema;
-    int m_array_descriptor;
 };
 
 // used to ingest information into OmicsDS
@@ -697,39 +407,4 @@ class TranscriptomicsLoader : public OmicsLoader {
   protected:
     virtual void add_reader(const std::string& filename) override;
     std::shared_ptr<GeneIdMap> m_gene_id_map;
-};
-
-// used to query from OmicsDS
-class OmicsExporter : public OmicsModule {
-  public:
-    OmicsExporter(const std::string& workspace, const std::string& array) : OmicsModule(workspace, array) {
-      deserialize_schema();
-      tiledb_open_array(false);
-    }
-  
-    typedef std::function<void (const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data)> process_function;
-    // used to query given range
-    // will use proc as callback if specified, otherwise will default to process
-    void query(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, process_function proc = 0);
-
-  protected:
-    // coords are in standard order SAMPLE, POSITION, COLLISION INDEX
-    virtual void process(const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data);
-    std::vector<std::vector<uint8_t>> m_buffers_vector;
-    std::pair<std::vector<void*>, std::vector<size_t>> prepare_buffers();
-    size_t m_buffer_size = 10240;
-    void check(const std::string& name, const OmicsFieldInfo& inf); // check that an attribute exists in schema (useful for specific data e.g. ensure that the data is actually from readcounts/sam files before exporting
-};
-
-// for exporting data as SAM files
-// will create one per row with name sam_output[row idx].sam
-// rows with no data in query range will not appear in output
-class SamExporter : public OmicsExporter { // for exporting data as SAM files
-  public:
-    SamExporter(const std::string& workspace, const std::string& array);
-    void export_sams(std::array<int64_t, 2> sample_range = {0, std::numeric_limits<int64_t>::max()}, std::array<int64_t, 2> position_range = {0, std::numeric_limits<int64_t>::max()}, const std::string& ouput_prefix = "sam_output");
-
-  protected:
-    // callback to write to sam files
-    void sam_interface(std::map<int64_t, std::shared_ptr<std::ofstream>>& files, const std::string& output_prefix, const std::array<uint64_t, 3>& coords, const std::vector<OmicsFieldData>& data);
 };

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <getopt.h>
 #include "omicsds_loader.h"
+#include "omicsds_export.h"
 // FIXME REMOVE
 #include <chrono>
 #include <thread>
