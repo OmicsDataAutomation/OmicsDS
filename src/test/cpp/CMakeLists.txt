@@ -28,7 +28,8 @@
 include_directories(Catch INTERFACE Catch2/single_include)
 
 set(CPP_TEST_SOURCES
-        test_omicsds_loader.cc)
+        test_omicsds_loader.cc
+        test_file_utility.cc)
 add_executable(ctests ${CPP_TEST_SOURCES})
 target_include_directories(ctests PRIVATE ${CMAKE_SOURCE_DIR}/src/main/cpp/loader)
 target_compile_definitions(ctests PRIVATE -DOMICSDS_TEST_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/../inputs/")
