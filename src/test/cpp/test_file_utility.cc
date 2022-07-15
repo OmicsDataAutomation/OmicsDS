@@ -69,5 +69,26 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
       REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
       REQUIRE(fu.chars_read == fu.buffer_size);
     }
+    SECTION("test read file", "[utility FileUtility readfile]") {
+      std::string tmp_file = append("big-write-test");
+      REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
+      FileUtility fu = FileUtility(tmp_file);
+
+      char buf[256];
+      SECTION("test small read") {
+        size_t read_size = 5;
+        fu.read_file(buf, read_size);
+        REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
+      }
+      SECTION("test full read") {
+        fu.read_file(buf, test_text.size());
+        REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+      }
+      SECTION("test over-extended read") {
+        int rc = fu.read_file(buf, 256);
+        REQUIRE(rc == TILEDB_ERR);
+        REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+      }
+    }
   }
 }
