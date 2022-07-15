@@ -74,20 +74,35 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
       REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
       FileUtility fu = FileUtility(tmp_file);
 
-      char buf[256];
+      
       SECTION("test small read") {
+        char buf[256];
         size_t read_size = 5;
         fu.read_file(buf, read_size);
         REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
+        REQUIRE(fu.chars_read == read_size);
+        fu.chars_read = 0; // Reset for next test
       }
       SECTION("test full read") {
+        char buf[256];
         fu.read_file(buf, test_text.size());
         REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+        REQUIRE(fu.chars_read == test_text.size());
+        fu.chars_read = 0; // Reset for next test
       }
       SECTION("test over-extended read") {
+        char buf[256];
         int rc = fu.read_file(buf, 256);
         REQUIRE(rc == TILEDB_ERR);
         REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+      }
+      SECTION("test multiple reads") {
+        char buf[256];
+        size_t read_size = 4;
+        int rc = fu.read_file(buf, read_size);
+        REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
+        rc = fu.read_file(buf, read_size);
+        REQUIRE(strncmp(buf, test_text.c_str() + read_size, read_size) == 0);
       }
     }
   }
