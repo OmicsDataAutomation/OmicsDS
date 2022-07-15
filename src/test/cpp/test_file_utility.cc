@@ -69,12 +69,26 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
       REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
       REQUIRE(fu.chars_read == fu.buffer_size);
     }
-    SECTION("test read file", "[utility FileUtility readfile]") {
+    SECTION("test file bigger than buffer without newline", "[utility FileUtility read big-file]") {
       std::string tmp_file = append("big-write-test");
+      std::string large_string = "";
+      FileUtility tmp_fu = FileUtility(tmp_file);
+      for(int i = 0; i < 2*tmp_fu.buffer_size; i++) {
+        large_string = large_string + "a";
+      }
+      large_string = large_string + "\n";
+      REQUIRE(FileUtility::write_file(tmp_file, large_string) == TILEDB_OK);
+      FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to get new write
+
+      std::string retval;
+      fu.generalized_getline(retval);
+      REQUIRE(retval == large_string.substr(0, large_string.size() - 1));
+    }
+    SECTION("test read file", "[utility FileUtility readfile]") {
+      std::string tmp_file = append("read-test");
       REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
       FileUtility fu = FileUtility(tmp_file);
 
-      
       SECTION("test small read") {
         char buf[256];
         size_t read_size = 5;
@@ -103,6 +117,33 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
         REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
         rc = fu.read_file(buf, read_size);
         REQUIRE(strncmp(buf, test_text.c_str() + read_size, read_size) == 0);
+      }
+    }
+    SECTION("test combindation reads") {
+      SECTION("test read_file -> getline") {
+        std::string tmp_file = append("read-test");
+        REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
+        FileUtility fu = FileUtility(tmp_file);
+        char buf[10];
+        fu.read_file(buf, strlen("line1\n"));
+        REQUIRE(strncmp(buf, "line1\n", strlen("line1\n")) == 0);
+
+        std::string retval;
+        fu.generalized_getline(retval);
+        REQUIRE(retval == "line2");
+      }
+      SECTION("test getline -> read_file") {
+        std::string tmp_file = append("read-test");
+        REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
+        FileUtility fu = FileUtility(tmp_file);
+
+        std::string retval;
+        fu.generalized_getline(retval);
+        REQUIRE(retval == "line1");
+
+        char buf[10];
+        fu.read_file(buf, strlen("line2\n"));
+        REQUIRE(strncmp(buf, "line2\n", strlen("line2\n")) == 0);
       }
     }
   }
