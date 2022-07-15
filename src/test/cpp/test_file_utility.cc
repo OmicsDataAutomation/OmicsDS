@@ -92,14 +92,16 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
       SECTION("test small read") {
         char buf[256];
         size_t read_size = 5;
-        fu.read_file(buf, read_size);
+        int rc = fu.read_file(buf, read_size);
+        REQUIRE(rc == TILEDB_OK);
         REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
         REQUIRE(fu.chars_read == read_size);
         fu.chars_read = 0; // Reset for next test
       }
       SECTION("test full read") {
         char buf[256];
-        fu.read_file(buf, test_text.size());
+        int rc = fu.read_file(buf, test_text.size());
+        REQUIRE(rc == TILEDB_OK);
         REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
         REQUIRE(fu.chars_read == test_text.size());
         fu.chars_read = 0; // Reset for next test
@@ -142,7 +144,8 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
         REQUIRE(retval == "line1");
 
         char buf[10];
-        fu.read_file(buf, strlen("line2\n"));
+        int rc = fu.read_file(buf, strlen("line2\n"));
+        REQUIRE(rc == TILEDB_OK);
         REQUIRE(strncmp(buf, "line2\n", strlen("line2\n")) == 0);
       }
     }
