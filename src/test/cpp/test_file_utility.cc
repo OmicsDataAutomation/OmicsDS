@@ -129,6 +129,15 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
         REQUIRE(retval == "a");
         REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
         REQUIRE(fu.chars_read == fu.buffer_size);
+        
+        SECTION("test read_line after generalized_getline with big write") {
+          char buf[1024];
+          size_t read_size = fu.str_buffer.size() + 10;
+          size_t chars_read = fu.chars_read;
+          REQUIRE(fu.read_file(buf, read_size) == TILEDB_OK);
+          REQUIRE(chars_read + 10 == fu.chars_read);
+          REQUIRE(strncmp(buf, large_string.substr(2, read_size).c_str(), read_size) == 0);
+        }
       }
       SECTION("test file bigger than buffer without newline", "[utility FileUtility read big-file]") {
         std::string large_string = "";
