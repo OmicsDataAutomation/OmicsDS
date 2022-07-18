@@ -79,7 +79,7 @@ int FileUtility::read_file(void* buffer, size_t chars_to_read) {
     buf_position = read_from_str_buffer(buffer, chars_to_read);
     chars_to_read -= buf_position;
   }
-  int rcode = TileDBUtils::read_file(filename, chars_read, buffer + buf_position, chars_to_read);
+  int rcode = TileDBUtils::read_file(filename, chars_read, (char*)buffer + buf_position, chars_to_read);
   chars_read += chars_to_read;
   CHECK_RC(rcode);
   return rcode;
