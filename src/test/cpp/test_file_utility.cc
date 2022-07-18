@@ -32,121 +32,117 @@
 
 TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
   std::string test_text = "line1\nline2\n";
+
   SECTION("test writes", "[utility FileUtility write]") {
     std::string tmp_file = append("write-test");
     REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
   }
+  
   SECTION("test reads", "[utility FileUtility read]") {
-    SECTION("test iterated getline", "[utility FileUtility read getline]") {
-      std::string tmp_file = append("write-test");
+    std::string tmp_file = append("read-test");
+    SECTION("test common reads", "[utility FileUtility read]") {
       REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
-      FileUtility fu = FileUtility(tmp_file);
-      
-      std::string retval;
-      fu.generalized_getline(retval);
-      REQUIRE(retval == "line1");
-      REQUIRE(fu.str_buffer == "line2\n");
-      REQUIRE(fu.chars_read == test_text.length());
-      fu.generalized_getline(retval);
-      REQUIRE(retval == "line2");
-      REQUIRE(fu.str_buffer == "");
-      fu.generalized_getline(retval);
-      REQUIRE(retval == "");
-    }
-    SECTION("test file bigger than buffer", "[utility FileUtility read big-file]") {
-      std::string tmp_file = append("big-write-test");
-      std::string large_string = "";
-      FileUtility tmp_fu = FileUtility(tmp_file);
-      for(int i = 0; i < 2*tmp_fu.buffer_size; i++) {
-        large_string = large_string + "a\n";
-      }
-      REQUIRE(FileUtility::write_file(tmp_file, large_string) == TILEDB_OK);
-      FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to get new write
 
-      std::string retval;
-      fu.generalized_getline(retval);
-      REQUIRE(retval == "a");
-      REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
-      REQUIRE(fu.chars_read == fu.buffer_size);
-    }
-    SECTION("test file bigger than buffer without newline", "[utility FileUtility read big-file]") {
-      std::string tmp_file = append("big-write-test");
-      std::string large_string = "";
-      FileUtility tmp_fu = FileUtility(tmp_file);
-      for(int i = 0; i < 2*tmp_fu.buffer_size; i++) {
-        large_string = large_string + "a";
-      }
-      large_string = large_string + "\n";
-      REQUIRE(FileUtility::write_file(tmp_file, large_string) == TILEDB_OK);
-      FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to get new write
-
-      std::string retval;
-      fu.generalized_getline(retval);
-      REQUIRE(retval == large_string.substr(0, large_string.size() - 1));
-    }
-    SECTION("test read file", "[utility FileUtility readfile]") {
-      std::string tmp_file = append("read-test");
-      REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
-      FileUtility fu = FileUtility(tmp_file);
-
-      SECTION("test small read") {
-        char buf[256];
-        size_t read_size = 5;
-        int rc = fu.read_file(buf, read_size);
-        REQUIRE(rc == TILEDB_OK);
-        REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
-        REQUIRE(fu.chars_read == read_size);
-        fu.chars_read = 0; // Reset for next test
-      }
-      SECTION("test full read") {
-        char buf[256];
-        int rc = fu.read_file(buf, test_text.size());
-        REQUIRE(rc == TILEDB_OK);
-        REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
-        REQUIRE(fu.chars_read == test_text.size());
-        fu.chars_read = 0; // Reset for next test
-      }
-      SECTION("test over-extended read") {
-        char buf[256];
-        int rc = fu.read_file(buf, 256);
-        REQUIRE(rc == TILEDB_ERR);
-        REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
-      }
-      SECTION("test multiple reads") {
-        char buf[256];
-        size_t read_size = 4;
-        int rc = fu.read_file(buf, read_size);
-        REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
-        rc = fu.read_file(buf, read_size);
-        REQUIRE(strncmp(buf, test_text.c_str() + read_size, read_size) == 0);
-      }
-    }
-    SECTION("test combindation reads") {
-      SECTION("test read_file -> getline") {
-        std::string tmp_file = append("read-test");
-        REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
+      SECTION("test iterated getline", "[utility FileUtility read getline]") {
         FileUtility fu = FileUtility(tmp_file);
-        char buf[10];
-        fu.read_file(buf, strlen("line1\n"));
-        REQUIRE(strncmp(buf, "line1\n", strlen("line1\n")) == 0);
-
-        std::string retval;
-        fu.generalized_getline(retval);
-        REQUIRE(retval == "line2");
-      }
-      SECTION("test getline -> read_file") {
-        std::string tmp_file = append("read-test");
-        REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
-        FileUtility fu = FileUtility(tmp_file);
-
+        
         std::string retval;
         fu.generalized_getline(retval);
         REQUIRE(retval == "line1");
+        REQUIRE(fu.str_buffer == "line2\n");
+        REQUIRE(fu.chars_read == test_text.length());
+        fu.generalized_getline(retval);
+        REQUIRE(retval == "line2");
+        REQUIRE(fu.str_buffer == "");
+        fu.generalized_getline(retval);
+        REQUIRE(retval == "");
+      }
+      SECTION("test read file", "[utility FileUtility readfile]") {
+        FileUtility fu = FileUtility(tmp_file);
 
-        char buf[10];
-        int rc = fu.read_file(buf, strlen("line2\n"));
-        REQUIRE(rc == TILEDB_OK);
-        REQUIRE(strncmp(buf, "line2\n", strlen("line2\n")) == 0);
+        SECTION("test small read") {
+          char buf[256];
+          size_t read_size = 5;
+          REQUIRE(fu.read_file(buf, read_size) == TILEDB_OK);
+          REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
+          REQUIRE(fu.chars_read == read_size);
+          fu.chars_read = 0; // Reset for next test
+        }
+        SECTION("test full read") {
+          char buf[256];
+          REQUIRE(fu.read_file(buf, test_text.size()) == TILEDB_OK);
+          REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+          REQUIRE(fu.chars_read == test_text.size());
+          fu.chars_read = 0; // Reset for next test
+        }
+        SECTION("test over-extended read") {
+          char buf[256];
+          REQUIRE(fu.read_file(buf, 256) == TILEDB_ERR);
+          REQUIRE(strncmp(buf, test_text.c_str(), test_text.size()) == 0);
+        }
+        SECTION("test multiple reads") {
+          char buf[256];
+          size_t read_size = 4;
+          REQUIRE(fu.read_file(buf, read_size) == TILEDB_OK);
+          REQUIRE(strncmp(buf, test_text.c_str(), read_size) == 0);
+          REQUIRE(fu.read_file(buf, read_size) == TILEDB_OK);
+          REQUIRE(strncmp(buf, test_text.c_str() + read_size, read_size) == 0);
+        }
+      }
+      SECTION("test combindation reads") {
+        SECTION("test read_file -> getline") {
+          FileUtility fu = FileUtility(tmp_file);
+          char buf[10];
+          fu.read_file(buf, strlen("line1\n"));
+          REQUIRE(strncmp(buf, "line1\n", strlen("line1\n")) == 0);
+
+          std::string retval;
+          fu.generalized_getline(retval);
+          REQUIRE(retval == "line2");
+        }
+        SECTION("test getline -> read_file") {
+          FileUtility fu = FileUtility(tmp_file);
+
+          std::string retval;
+          fu.generalized_getline(retval);
+          REQUIRE(retval == "line1");
+
+          char buf[10];
+          REQUIRE(fu.read_file(buf, strlen("line2\n")) == TILEDB_OK);
+          REQUIRE(strncmp(buf, "line2\n", strlen("line2\n")) == 0);
+          REQUIRE(fu.str_buffer == "");
+        }
+      }
+    }
+    SECTION("test big writes", "[utility FileUtility read big-file]") {
+      SECTION("test file bigger than buffer", "[utility FileUtility read big-file]") {
+        std::string large_string = "";
+        FileUtility tmp_fu = FileUtility(tmp_file);
+        for(int i = 0; i < 2*tmp_fu.buffer_size; i++) {
+          large_string = large_string + "a\n";
+        }
+        REQUIRE(FileUtility::write_file(tmp_file, large_string) == TILEDB_OK);
+        FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to pick up the write
+
+        std::string retval;
+        fu.generalized_getline(retval);
+        REQUIRE(retval == "a");
+        REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
+        REQUIRE(fu.chars_read == fu.buffer_size);
+      }
+      SECTION("test file bigger than buffer without newline", "[utility FileUtility read big-file]") {
+        std::string large_string = "";
+        FileUtility tmp_fu = FileUtility(tmp_file);
+        for(int i = 0; i < 2*tmp_fu.buffer_size; i++) {
+          large_string = large_string + "a";
+        }
+        large_string = large_string + "\n";
+        REQUIRE(FileUtility::write_file(tmp_file, large_string) == TILEDB_OK);
+        FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to get new write
+
+        std::string retval;
+        fu.generalized_getline(retval);
+        REQUIRE(retval == large_string.substr(0, large_string.size() - 1));
       }
     }
   }
