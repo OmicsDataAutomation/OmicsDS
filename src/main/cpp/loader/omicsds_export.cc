@@ -142,7 +142,7 @@ static std::string cigar_to_string(const uint32_t* cigar, size_t n_cigar) {
 
   std::stringstream ss;
 
-  for(int i = 0; i < n_cigar; i++) {
+  for(size_t i = 0; i < n_cigar; i++) {
     uint32_t op_idx = cigar[i] & op_mask;
     if(op_idx >= sizeof(cigar_codes)) {
       std::cerr << "Error, cigar is badly formed" << std::endl;
