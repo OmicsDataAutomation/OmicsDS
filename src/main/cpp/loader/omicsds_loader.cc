@@ -238,7 +238,7 @@ uint64_t GenomicMap::flatten(std::string contig_name, uint64_t offset) {
 bool equivalent_schema(const OmicsSchema& l, const OmicsSchema& r) {
   if(l.attributes.size() != r.attributes.size()) return false;
 
-  for(auto li = l.attributes.begin(), ri = r.attributes.begin(); li != l.attributes.end(), ri != r.attributes.end(); li++, ri++) {
+  for(auto li = l.attributes.begin(), ri = r.attributes.begin(); (li != l.attributes.end()) && (ri != r.attributes.end()); li++, ri++) {
     if(li->first != ri->first) return false;
     if(li->second.type != ri->second.type) return false;
   }

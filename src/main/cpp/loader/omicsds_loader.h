@@ -229,6 +229,7 @@ class OmicsFileReader { // FIXME encode whether cells are end cells (can be dedu
   public:
     OmicsFileReader(std::string filename, std::shared_ptr<OmicsSchema> schema, std::shared_ptr<SampleMap> sample_map, int file_idx) : /*m_file(filename),*/ m_reader_util(std::make_shared<FileUtility>(filename)), m_schema(schema), m_sample_map(sample_map), m_file_idx(file_idx) {
     }
+    virtual ~OmicsFileReader() = default;
 
     const std::string& get_filename() {
       return m_reader_util->filename;
