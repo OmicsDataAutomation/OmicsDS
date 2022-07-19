@@ -47,7 +47,6 @@ TEST_CASE("test OmicsFieldData class", "[omicsfielddata]") {
     ofd.push_pointer_back(string_arr, 3);
 
     SECTION("test array gets", "[omicsfielddata operator-bracket]") {
-      // uint8_t* data = ofd.data.data();
       size_t byte_offset = 0;
       REQUIRE((int) ofd[byte_offset] == 5);
       byte_offset += sizeof(int);
@@ -69,6 +68,17 @@ TEST_CASE("test OmicsFieldData class", "[omicsfielddata]") {
 
       byte_offset += sizeof(str_buf);
       REQUIRE(ofd.size() == byte_offset);
+    }
+
+    SECTION("test typed gets bounds checking", "[omicsfielddata bounds get]") {
+      REQUIRE_THROWS(ofd.get<uint8_t>(ofd.size()));
+
+      // Test to exercise accessing an element when the start index position is not past the end of the array, but
+      // there is not enough data between the start and the end for the given type. The previous pushes should leave us
+      // in this state, but the first REQUIRE will confirm this.
+      size_t test_struct_size = ofd.typed_size<test_struct>();
+      REQUIRE(test_struct_size % sizeof(test_struct) != 0);
+      REQUIRE_THROWS(ofd.get<test_struct>(ofd.typed_size<test_struct>()));
     }
 
     SECTION("test typed gets", "[omicsfielddata get]") {
