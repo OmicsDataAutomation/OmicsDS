@@ -91,6 +91,9 @@ struct FileUtility {
     CHECK_RC(rcode);
     return rcode;
   }
+
+private:
+  size_t read_from_str_buffer(void* buffer, size_t chars_to_read);
 };
 
 // datastructure that keeps contigs sorted by name and position

@@ -74,10 +74,22 @@ bool FileUtility::generalized_getline(std::string& retval) {
 }
 
 int FileUtility::read_file(void* buffer, size_t chars_to_read) {
-  int rcode = TileDBUtils::read_file(filename, chars_read, buffer, chars_to_read);
+  size_t buf_position = 0;
+  if(str_buffer.size() > 0) {
+    buf_position = read_from_str_buffer(buffer, chars_to_read);
+    chars_to_read -= buf_position;
+  }
+  int rcode = TileDBUtils::read_file(filename, chars_read, (char*)buffer + buf_position, chars_to_read);
   chars_read += chars_to_read;
   CHECK_RC(rcode);
   return rcode;
+}
+
+size_t FileUtility::read_from_str_buffer(void* buffer, size_t chars_to_read) {
+  size_t readable_chars = std::min<size_t>(str_buffer.size(), chars_to_read);
+  memcpy(buffer, str_buffer.c_str(), readable_chars);
+  str_buffer.erase(0, readable_chars);
+  return readable_chars;
 }
 
 void read_sam_file(std::string filename) {
