@@ -221,7 +221,7 @@ struct OmicsFieldInfo {
     return std::to_string(length);
   }
 
-  int element_size() {
+  size_t element_size() {
     switch(type) {
       case omics_char:     return 1;
       case omics_uint8_t:  return 1;

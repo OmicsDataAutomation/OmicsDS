@@ -827,7 +827,7 @@ void OmicsLoader::buffer_cell(const OmicsCell& cell, int level) {
     auto& data = fiter->data;
 
     int length = aiter->second.length;
-    int size = aiter->second.element_size();
+    size_t size = aiter->second.element_size();
     if(length == TILEDB_VAR_NUM) { // variable length
       OmicsFieldData::push_back<size_t>(offset_buffers[i], attribute_offsets[i]);
       attribute_offsets[i] += data.size();
@@ -836,7 +836,8 @@ void OmicsLoader::buffer_cell(const OmicsCell& cell, int level) {
       }
     }
     else {
-      assert(data.size() == size * length);
+      assert(length >= 0); // Should only be negative if variable
+      assert(data.size() == size * (size_t) length);
       for(auto& c : data) {
         offset_buffers[i].push_back(c);
       }
