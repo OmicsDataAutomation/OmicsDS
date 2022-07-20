@@ -91,6 +91,9 @@ struct FileUtility {
     CHECK_RC(rcode);
     return rcode;
   }
+
+private:
+  size_t read_from_str_buffer(void* buffer, size_t chars_to_read);
 };
 
 // datastructure that keeps contigs sorted by name and position
@@ -218,7 +221,7 @@ struct OmicsFieldInfo {
     return std::to_string(length);
   }
 
-  int element_size() {
+  size_t element_size() {
     switch(type) {
       case omics_char:     return 1;
       case omics_uint8_t:  return 1;
