@@ -44,7 +44,9 @@ TEST_CASE("test OmicsFieldData class", "[omicsfielddata]") {
     ofd.push_back(my_struct);
 
     std::string string_arr[3] = {"string0", "string1", "string2"};
-    ofd.push_pointer_back(string_arr, 3);
+    for (auto i=0u; i<3; i++) {
+      ofd.push_pointer_back(string_arr[i].c_str(), string_arr[i].length());
+    }
 
     SECTION("test array gets", "[omicsfielddata operator-bracket]") {
       size_t byte_offset = 0;
@@ -60,13 +62,13 @@ TEST_CASE("test OmicsFieldData class", "[omicsfielddata]") {
       REQUIRE(ret_struct->z == 15903);
       byte_offset += sizeof(test_struct);
 
-      std::string str_buf[3];
-      memcpy(str_buf, ofd.get_ptr<uint8_t>() + byte_offset, 3*sizeof(std::string));
-      REQUIRE(str_buf[0] == "string0");
-      REQUIRE(str_buf[1] == "string1");
-      REQUIRE(str_buf[2] == "string2");
+      char str_buf[8];
+      for (auto i=0ul; i<3; i++) {
+	memcpy(str_buf, ofd.get_ptr<uint8_t>() + byte_offset, string_arr[i].length());
+	REQUIRE(str_buf == string_arr[i]);
+	byte_offset += string_arr[i].length();
+      }
 
-      byte_offset += sizeof(str_buf);
       REQUIRE(ofd.size() == byte_offset);
     }
 
@@ -97,11 +99,11 @@ TEST_CASE("test OmicsFieldData class", "[omicsfielddata]") {
     }
 
     SECTION("test typed sizes", "[omicsfielddata sizes]") {
-      size_t size = sizeof(int) + sizeof(char) + sizeof(test_struct) + 3*sizeof(std::string);
+      size_t size = sizeof(int) + sizeof(char) + sizeof(test_struct) + string_arr[0].length()
+	+ string_arr[1].length() + string_arr[2].length();
       REQUIRE(ofd.typed_size<int>() == size / sizeof(int));
-      REQUIRE(ofd.typed_size<char>() == size / sizeof(char));
+      REQUIRE(ofd.typed_size<char>() == size /sizeof(char));
       REQUIRE(ofd.typed_size<test_struct>() == size / sizeof(test_struct));
-      REQUIRE(ofd.typed_size<std::string>() == size / sizeof(std::string));
     }
   }
 }

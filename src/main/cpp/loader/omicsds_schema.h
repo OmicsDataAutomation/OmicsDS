@@ -31,6 +31,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <utility>
 
@@ -304,16 +305,12 @@ struct OmicsFieldData {
     push_back(data, elem);
   }
 
-  // templated utilty function to insert elements of potentially more than one byte into vector via pointer
-  // useful for c strings/vectors
-  template<class T>
-  void push_pointer_back(const T* elem_ptr, int n) {
-    size_t size = data.size();
-    data.resize(data.size() + sizeof(T)*n);
-    T* ptr = reinterpret_cast<T*>(data.data() + size);
-
-    for(int i = 0; i < n; i++) {
-      ptr[i] = elem_ptr[i];
+  // templated utility function to insert elements of integral types and of size length.
+  template<typename T>
+  void push_pointer_back(const T* elem_ptr, size_t length) {
+    static_assert(std::is_integral<T>::value, "Only Integral types can be specified.");
+    for(auto i = 0ul; i < length; i++) {
+      push_back(*(elem_ptr+i));
     }
   }
   
