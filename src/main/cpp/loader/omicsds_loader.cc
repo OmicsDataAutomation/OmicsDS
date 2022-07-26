@@ -69,8 +69,8 @@ bool FileUtility::generalized_getline(std::string& retval) {
 
     str_buffer.insert(str_buffer.end(), buffer, buffer + chars_to_read);
   }
-
-  return false;
+  // Last line of the file may be lacking a newline
+  return retval != "";
 }
 
 int FileUtility::read_file(void* buffer, size_t chars_to_read) {
