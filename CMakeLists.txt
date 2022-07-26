@@ -94,6 +94,30 @@ endif()
 # https://www.cmake.org/cmake/help/latest/policy/CMP0063.html
 #cmake_policy(SET CMP0063 NEW)
 
+# Collect profiling stats to use with gperf/pprof
+# To install gperftools - sudo yum -y install gperftools - Centos 7
+#                         sudo apt-get install -y google-perftools - Ubuntu
+#                         brew install gperftools - Mac
+# See https://gperftools.github.io/gperftools/cpuprofile.html
+option(USE_GPERFTOOLS "Collect profiling information using gperftools/profiler for analysis with pprof")
+# See https://gperftools.github.io/gperftools/heapprofile.html
+option(USE_GPERFTOOLS_HEAP "Collect heap profiling information using gperftools/tcmalloc for analysis with pprof")
+if(USE_GPERFTOOLS OR USE_GPERFTOOLS_HEAP)
+    find_package(GPerftools)
+    if(GPERFTOOLS_FOUND OR GPERFTOOLS_HEAP_FOUND)
+        message(STATUS "Enabling profiling using GPerftools")
+        include_directories(${GPERFTOOLS_INCLUDE_DIR})
+        if(USE_GPERFTOOLS)
+            add_definitions(-DUSE_GPERFTOOLS)
+        endif()
+        if(USE_GPERFTOOLS_HEAP)
+            add_definitions(-DUSE_GPERFTOOLS_HEAP)
+        endif()
+    else()
+        message(WARNING "GPerftools headers/library not found")
+    endif()
+endif()
+
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(ZLIB REQUIRED)

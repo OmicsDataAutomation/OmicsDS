@@ -1,5 +1,5 @@
 #
-# CMakeLists.txt
+# FindGPerftools.cmake
 #
 # The MIT License
 #
@@ -23,14 +23,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
+# Determine compiler flags for gperftools
+# Once done this will define
+# GPERFTOOLS_FOUND - gperftools found
+#
 
-add_executable(omicsds_import import.cc)
-target_include_directories(omicsds_import PRIVATE ${CMAKE_SOURCE_DIR}/src/main/cpp/loader)
-target_link_libraries(omicsds_import omicsds_static)
-if(USE_GPERFTOOLS AND GPERFTOOLS_FOUND)
-  target_link_libraries(omicsds_import ${GPERFTOOLS_PROFILER_LIBRARY})
-endif()
-if(USE_GPERFTOOLS_HEAP AND GPERFTOOLS_FOUND)
-  target_link_libraries(omicsds_import ${GPERFTOOLS_HEAP_PROFILER_LIBRARY})
+if (USE_GPERFTOOLS)
+  find_path(GPERFTOOLS_INCLUDE_DIR NAMES gperftools/profiler.h HINTS "${GPERFTOOLS_DIR}" "${GPERFTOOLS_DIR}/include")
+  find_library(GPERFTOOLS_PROFILER_LIBRARY NAMES profiler HINTS "${GPERFTOOLS_DIR}" "${GPERFTOOLS_DIR}/lib64" "${GPERFTOOLS_DIR}/lib")
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(GPerftools "Could not find gperftools headers and/or libraries ${DEFAULT_MSG}" GPERFTOOLS_PROFILER_LIBRARY GPERFTOOLS_INCLUDE_DIR)
 endif()
 
+if (USE_GPERFTOOLS_HEAP)
+  find_path(GPERFTOOLS_INCLUDE_DIR NAMES gperftools/tcmalloc.h HINTS "${GPERFTOOLS_DIR}" "${GPERFTOOLS_DIR}/include")
+  find_library(GPERFTOOLS_HEAP_PROFILER_LIBRARY NAMES tcmalloc HINTS "${GPERFTOOLS_DIR}" "${GPERFTOOLS_DIR}/lib64" "${GPERFTOOLS_DIR}/lib")
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(GPerftools "Could not find gperftools heap headers and/or libraries ${DEFAULT_MSG}" GPERFTOOLS_HEAP_PROFILER_LIBRARY GPERFTOOLS_INCLUDE_DIR)
+endif()

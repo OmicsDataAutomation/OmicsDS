@@ -47,3 +47,6 @@ TAGS
 build/
 install/
 release/
+
+#gperf output
+omicsds_import.gperf.*

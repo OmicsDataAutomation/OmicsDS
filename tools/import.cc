@@ -6,6 +6,14 @@
 #include <chrono>
 #include <thread>
 
+#ifdef USE_GPERFTOOLS
+#include "gperftools/profiler.h"
+#endif
+
+#ifdef USE_GPERFTOOLS_HEAP
+#include "gperftools/heap-profiler.h"
+#endif
+
 enum ArgsEnum {
   ARGS_IDX_MAPPER
 };
@@ -149,6 +157,14 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Hello there: " << workspace << ", " << array << ", " << mapping_file << std::endl;
 
+#ifdef USE_GPERFTOOLS
+    std::cout << "Profiling Started" << std::endl;
+    ProfilerStart("omicsds_import.gperf.prof");
+#endif
+#ifdef USE_GPERFTOOLS_HEAP
+    HeapProfilerStart("omicsds_import.gperf.heap");
+#endif  
+
   if(read_level) {
     {
       ReadCountLoader l(workspace, array, file_list, sample_map, mapping_file, position_major);
@@ -176,6 +192,13 @@ int main(int argc, char* argv[]) {
     SamExporter s(workspace, array);
     s.export_sams();
   }
+
+#ifdef USE_GPERFTOOLS_HEAP
+    HeapProfilerStop();
+#endif
+#ifdef USE_GPERFTOOLS
+    ProfilerStop();
+#endif
 
   /*// FIXME remove
   std::cerr << "FIXME remove end of main reading" << std::endl;
