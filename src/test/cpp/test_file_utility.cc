@@ -37,24 +37,37 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
     std::string tmp_file = append("write-test");
     REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
   }
+
   
   SECTION("test reads", "[utility FileUtility read]") {
     std::string tmp_file = append("read-test");
     SECTION("test common reads", "[utility FileUtility read]") {
+      SECTION("test no newline") {
+        REQUIRE(FileUtility::write_file(tmp_file, test_text.substr(0, test_text.size()-1)) == TILEDB_OK);
+        FileUtility fu = FileUtility(tmp_file);
+        
+        std::string retval;
+        
+        REQUIRE(fu.generalized_getline(retval));
+        REQUIRE(retval == "line1");
+        REQUIRE(fu.generalized_getline(retval));
+        REQUIRE(retval == "line2");
+      }
+
       REQUIRE(FileUtility::write_file(tmp_file, test_text) == TILEDB_OK);
 
       SECTION("test iterated getline", "[utility FileUtility read getline]") {
         FileUtility fu = FileUtility(tmp_file);
         
         std::string retval;
-        fu.generalized_getline(retval);
+        REQUIRE(fu.generalized_getline(retval));
         REQUIRE(retval == "line1");
         REQUIRE(fu.str_buffer == "line2\n");
         REQUIRE(fu.chars_read == test_text.length());
-        fu.generalized_getline(retval);
+        REQUIRE(fu.generalized_getline(retval));
         REQUIRE(retval == "line2");
         REQUIRE(fu.str_buffer == "");
-        fu.generalized_getline(retval);
+        REQUIRE(!fu.generalized_getline(retval));
         REQUIRE(retval == "");
       }
       SECTION("test read file", "[utility FileUtility readfile]") {
@@ -97,14 +110,14 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
           REQUIRE(strncmp(buf, "line1\n", strlen("line1\n")) == 0);
 
           std::string retval;
-          fu.generalized_getline(retval);
+          REQUIRE(fu.generalized_getline(retval));
           REQUIRE(retval == "line2");
         }
         SECTION("test getline -> read_file") {
           FileUtility fu = FileUtility(tmp_file);
 
           std::string retval;
-          fu.generalized_getline(retval);
+          REQUIRE(fu.generalized_getline(retval));
           REQUIRE(retval == "line1");
 
           char buf[10];
@@ -125,7 +138,7 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
         FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to pick up the write
 
         std::string retval;
-        fu.generalized_getline(retval);
+        REQUIRE(fu.generalized_getline(retval));
         REQUIRE(retval == "a");
         REQUIRE(fu.chars_read == fu.str_buffer.size() + (retval.length() + 1));
         REQUIRE(fu.chars_read == fu.buffer_size);
@@ -150,7 +163,7 @@ TEST_CASE_METHOD(TempDir, "test FileUtility", "[utility FileUtility]") {
         FileUtility fu = FileUtility(tmp_file); // Need to recreate the FileUtility class to get new write
 
         std::string retval;
-        fu.generalized_getline(retval);
+        REQUIRE(fu.generalized_getline(retval));
         REQUIRE(retval == large_string.substr(0, large_string.size() - 1));
       }
     }
