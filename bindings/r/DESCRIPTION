@@ -1,0 +1,15 @@
+Package: omicsds
+Type: Package
+Title: OmicsDS R Bindings
+Version: 0.0.1
+Date: 2022-07-15
+Author: OmicsDS
+Maintainer: OmicsDS <nalinigans@github.com>
+Description: This package features experimental R Bindings to the native OmicsDS interface.
+License: MIT + file LICENSE
+SystemRequirements: C++11
+Imports: Rcpp (>= 1.0.0)
+LinkingTo: Rcpp
+Suggests: 
+    testthat (>= 2.1.0)
+Encoding: UTF-8

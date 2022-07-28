@@ -26,13 +26,19 @@
 
 set(OMICSDS_CPP "${CMAKE_CURRENT_SOURCE_DIR}/cpp")
 
-set(OMICSDB_INCLUDE
-  ${OMICSDS_CPP}/loader/omicsdb_loader.h
+set(OMICSDS_API_INCLUDE
+  ${OMICSDS_CPP}/api/omicsds.h
+  )
+
+set(OMICSDS_INCLUDE_DIRS
+  ${OMICSDS_CPP}/loader
+  ${OMICSDS_CPP}/api
   )
 
 set(OMICSDS_SOURCES
   ${OMICSDS_CPP}/loader/omicsds_loader.cc
   ${OMICSDS_CPP}/loader/omicsds_export.cc
+  ${OMICSDS_CPP}/api/omicsds.cc
   )
 
 # Use PIC
@@ -42,8 +48,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 add_library(omicsds_objs OBJECT ${OMICSDS_SOURCES})
 
 target_include_directories(omicsds_objs
-  PUBLIC ${CMAKE_BINARY_DIR}/src
-  PRIVATE ${OMICSDS_CPP} ${TILEDB_INCLUDE_DIR}
+  PRIVATE ${OMICSDS_INCLUDE_DIRS} ${TILEDB_INCLUDE_DIR}
   )
 
 # Create static library
@@ -74,6 +79,7 @@ install(
   ARCHIVE DESTINATION lib
   )
 
+#install include files
 install(
-  FILES ${OMICSDS_INCLUDE} ${EXPORTS_HEADER} DESTINATION include
+  FILES ${OMICSDS_API_INCLUDE} ${EXPORTS_HEADER} DESTINATION include/omicsds
   )
