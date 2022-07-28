@@ -26,7 +26,7 @@
 
 #include "omicsds_loader.h"
 #include "omicsds_export.h"
-#include "spdlog/spdlog.h"
+#include "omicsds_logger.h"
 
 std::vector<std::string> split(std::string str, std::string sep) {
   std::vector<std::string> retval;
@@ -633,16 +633,8 @@ std::vector<OmicsCell> MatrixReader::get_next_cells() {
 
   while(parse_next(sample_name, gene_name, score)) {
     bool skip_entry = false;
-    if(m_sample_map->count(sample_name) == 0) {
-      spdlog::warn("Sample {} not found in sample map.", sample_name);
-      skip_entry = true;
-    }
-    if(m_gene_id_map->count(gene_name) == 0) {
-      spdlog::warn("Gene {} not found in gene map.", gene_name);
-      skip_entry = true;
-    }
-    if(skip_entry) {
-      spdlog::warn("Skipping entry at Sample: {}, Gene: {}.", sample_name, gene_name);
+    if(m_sample_map->count(sample_name) == 0 || m_gene_id_map->count(gene_name) == 0) {
+      logger.warn("Skipping entry at Sample: {}, Gene: {}. Not present in mapping files.", sample_name, gene_name);
       continue; 
     }
     
