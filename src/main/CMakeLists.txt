@@ -33,6 +33,7 @@ set(OMICSDB_INCLUDE
 set(OMICSDS_SOURCES
   ${OMICSDS_CPP}/loader/omicsds_loader.cc
   ${OMICSDS_CPP}/loader/omicsds_export.cc
+  ${OMICSDS_CPP}/utils/omicsds_logger.cc
   )
 
 # Use PIC
@@ -43,7 +44,7 @@ add_library(omicsds_objs OBJECT ${OMICSDS_SOURCES})
 
 target_include_directories(omicsds_objs
   PUBLIC ${CMAKE_BINARY_DIR}/src
-  PRIVATE ${OMICSDS_CPP} ${TILEDB_INCLUDE_DIR}
+  PRIVATE ${OMICSDS_CPP}/utils ${TILEDB_INCLUDE_DIR}
   )
 
 # Create static library
