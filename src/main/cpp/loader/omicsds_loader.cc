@@ -634,7 +634,7 @@ std::vector<OmicsCell> MatrixReader::get_next_cells() {
   while(parse_next(sample_name, gene_name, score)) {
     bool skip_entry = false;
     if(m_sample_map->count(sample_name) == 0 || m_gene_id_map->count(gene_name) == 0) {
-      logger.warn("Skipping entry at Sample: {}, Gene: {}. Not present in mapping files.", sample_name, gene_name);
+      logger.info("Skipping entry at Sample: {}, Gene: {}. Not present in mapping files.", sample_name, gene_name);
       continue; 
     }
     
