@@ -75,7 +75,7 @@ TEST_CASE_METHOD(TempDir, "test MatrixLoader class", "[matrix]") {
     std::string good_file_list = append("good-file-list");
     REQUIRE(FileUtility::write_file(good_file_list, good_file) == TILEDB_OK);
 
-    std::string file_content = "SAMPLE\t" + valid_sample_name + "\n" + valid_gene_name + "\t1";
+    std::string file_content = "SAMPLE\t" + valid_sample_name + "\n" + valid_gene_name + "\t3.14";
     REQUIRE(FileUtility::write_file(good_file, file_content) == TILEDB_OK);
 
     {
@@ -88,7 +88,49 @@ TEST_CASE_METHOD(TempDir, "test MatrixLoader class", "[matrix]") {
     std::array<int64_t, 2> query_range = {0, std::numeric_limits<long>::max()};
 
     size_t size = 0;
-    r.query(query_range, query_range, [&size](auto a, auto b){size++;});
+    std::string schema_path = append("serialized_schema");
+    r.serialize_schema(schema_path);
+    FileUtility schema_reader = FileUtility(schema_path);
+    size_t attribute_start = 0;
+    size_t score_position = -1;
+    size_t line_num = 0;
+    while(schema_reader.generalized_getline(retval)) {
+      line_num++;
+      if(retval.find("attributes") != std::string::npos) {
+        attribute_start = line_num;
+      }
+      if(retval.find("SCORE") != std::string::npos) {
+        score_position = line_num;
+        break;
+      }
+    }
+
+
+    r.query(query_range, query_range, 
+      [&size, score_position, attribute_start](auto a, const std::vector<OmicsFieldData>& data){
+        size++; 
+        REQUIRE((data[score_position-attribute_start].get<float>() - 3.14) < 0.001);
+      }
+    );
     REQUIRE(size == 2);
+  }
+  SECTION("test full import", "[matrix]") {
+    std::string workspace_path = append("full-workspace");
+    std::string matrix_file_list = append("matrix-file-list");
+    std::string matrix_file = std::string(OMICSDS_TEST_INPUTS)+"OmicsDSTests/small_sorted.resort";
+    REQUIRE(FileUtility::write_file(matrix_file_list, matrix_file) == TILEDB_OK);
+
+    {
+      TranscriptomicsLoader l(workspace_path, "array", matrix_file_list, sample_map, gene_mapping_file, gene_map, true);
+      l.initialize();
+      l.import();
+    }
+
+    OmicsExporter r(workspace_path, "array");
+    std::array<int64_t, 2> query_range = {0, std::numeric_limits<long>::max()};
+
+    size_t size = 0;
+    r.query(query_range, query_range, [&size](auto a, auto b){size++;});
+    REQUIRE(size == 1216);
   }
 }
