@@ -33,7 +33,6 @@
 #include "omicsds_encoder.h"
 #include "omicsds_logger.h"
 
-#include <charconv>
 #include <cmath>
 #include <regex>
 
